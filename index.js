@@ -29,6 +29,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.isModalSubmit()) {
+    return handleCommandInteraction(interaction, 'handleModalSubmit', 'modal submit');
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    return handleCommandInteraction(interaction, 'handleSelectMenu', 'select menu');
+  }
+
+  if (interaction.isButton()) {
+    return handleCommandInteraction(interaction, 'handleButton', 'button');
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);
@@ -45,18 +57,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (error) {
     console.error(`Error running /${interaction.commandName}:`, error);
 
-    const errorMessage = {
-      content: 'There was an error while running this command.',
-      ephemeral: true
-    };
-
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(errorMessage);
-    } else {
-      await interaction.reply(errorMessage);
-    }
+    await sendInteractionError(interaction);
   }
 });
+
+async function handleCommandInteraction(interaction, handlerName, interactionTypeLabel) {
+  for (const command of client.commands.values()) {
+    if (!command[handlerName]) continue;
+
+    try {
+      const wasHandled = await command[handlerName](interaction, client);
+      if (wasHandled) return;
+    } catch (error) {
+      console.error(`Error handling ${interactionTypeLabel} interaction:`, error);
+      await sendInteractionError(interaction);
+      return;
+    }
+  }
+}
+
+async function sendInteractionError(interaction) {
+  const errorMessage = {
+    content: 'There was an error while running this command.',
+    ephemeral: true
+  };
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp(errorMessage);
+  } else {
+    await interaction.reply(errorMessage);
+  }
+}
 
 async function startBot() {
   if (!process.env.DISCORD_TOKEN) {
