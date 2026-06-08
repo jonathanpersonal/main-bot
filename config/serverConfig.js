@@ -90,6 +90,12 @@ Regards,
 
     commandRoleId: 'PUT_DEPARTMENT_COMMAND_ROLE_ID_HERE',
 
+    strikeRoleIds: {
+      1: 'PUT_STRIKE_1_ROLE_ID_HERE',
+      2: 'PUT_STRIKE_2_ROLE_ID_HERE',
+      3: 'PUT_STRIKE_3_ROLE_ID_HERE'
+    },
+
     tags: {
       pending: '1513618818449018990',
       underReview: '1513618859465375774',
@@ -138,12 +144,15 @@ Regards,
 Internal Affairs Team`,
       approvedStrike: `Dear {officerName},
 
-Thank you for appealing your strike. We have reviewed your appeal and have approved your appeal.
+Your strike appeal has been approved.
 
-Your strike has been overturned.
+The strike has been removed from your record.
 
 Reason:
 {approvalReason}
+
+Comments/notes:
+{comments}
 
 Next steps:
 {nextSteps}

@@ -863,7 +863,7 @@ async function trySendOfficerDm({ officerUser, serverConfig, action, details, st
     serverConfig,
     action,
     officerId: officerUser.id,
-    caseId: createCaseId(action)
+    caseId: createCaseId(action, strikeLevel)
   });
   const messageOptions = {
     content: formatDmMessage(template, buildDmPlaceholderValues({
@@ -957,8 +957,14 @@ function buildAppealButtonRow({ serverConfig, action, officerId, caseId }) {
   }
 }
 
-function createCaseId(action) {
-  return `${action.slice(0, 2)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+function createCaseId(action, strikeLevel) {
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+  if (action === 'strike' && strikeLevel) {
+    return `st${strikeLevel}-${suffix}`;
+  }
+
+  return `${action.slice(0, 2)}${suffix}`;
 }
 
 function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent, appealButtonIncluded }) {

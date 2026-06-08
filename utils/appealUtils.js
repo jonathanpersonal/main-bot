@@ -280,6 +280,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
   const officerDisplayName = getDisplayName(officerUser, officerMember);
   const submittedAt = new Date();
   const answers = getAppealAnswers(interaction, typeConfig);
+  const strikeLevel = appealType === 'strike' ? getStrikeLevelFromCaseId(caseId) : null;
   const pendingTagId = getConfiguredTagId(serverConfig, 'pending');
   const appliedTags = pendingTagId ? [pendingTagId] : [];
   const title = sanitizeThreadTitle(`Appeal - ${typeConfig.label} - ${officerDisplayName} - ${appealId}`);
@@ -291,7 +292,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
       name: title,
       appliedTags,
       message: {
-        content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers })]
+        content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel })]
           .filter(Boolean)
           .join('\n\n'),
         components: buildStaffActionRows({ appealType, officerId, appealId })
@@ -303,7 +304,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
       thread = await forum.threads.create({
         name: title,
         message: {
-          content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers })]
+          content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel })]
             .filter(Boolean)
             .join('\n\n'),
           components: buildStaffActionRows({ appealType, officerId, appealId })
@@ -577,6 +578,7 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
 
   await interaction.deferReply({ ephemeral: true });
   const isApproval = decision === 'approve';
+  const finalStatus = isApproval ? 'approved' : 'denied';
   const reason = interaction.fields.getTextInputValue('reason') || 'No reason provided.';
   const comments = interaction.fields.getTextInputValue('comments') || 'None provided.';
   const nextSteps = isApproval
@@ -585,26 +587,6 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
   const canReapply = isApproval
     ? ''
     : interaction.fields.getTextInputValue('canReapply') || 'No';
-  const tagName = isApproval ? 'approved' : 'denied';
-
-  await updateAppealTags(interaction.channel, serverConfig, [tagName], ['pending', 'underReview', 'infoNeeded']);
-
-  await safeThreadSend(interaction.channel, [
-    `Appeal ${isApproval ? 'approved' : 'denied'} by ${interaction.user}.`,
-    '',
-    `**Reason:**\n${reason}`,
-    '',
-    `**Comments/notes:**\n${comments}`,
-    ...(isApproval ? ['', `**Next steps/actions:**\n${nextSteps}`] : ['', `**Can reapply:**\n${canReapply}`])
-  ].join('\n'));
-
-  if (isApproval && appealType === 'termination') {
-    // TODO: Later automatically open a reinstatement ticket and ping configured command role.
-  }
-
-  if (isApproval && appealType === 'strike') {
-    // TODO: Later remove the configured strike role when strike tracking roles are added.
-  }
 
   const officerUser = await interaction.client.users.fetch(officerId).catch(() => null);
   const dmSent = await sendDecisionDm({
@@ -623,6 +605,40 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     await safeThreadSend(interaction.channel, `DM delivery failed for the appeal ${decision} decision.`);
   }
 
+  let strikeRemovalResult = null;
+  if (isApproval && appealType === 'termination') {
+    // TODO: Later automatically open an appeal reinstatement ticket and ping configured command role.
+  }
+
+  if (isApproval && appealType === 'strike') {
+    const strikeLevel = await getStrikeLevelFromThread(interaction.channel);
+    strikeRemovalResult = await removeStrikeRole({
+      guild: interaction.guild,
+      serverConfig,
+      officerId,
+      strikeLevel,
+      appealId
+    });
+  }
+
+  await safeThreadSend(interaction.channel, buildFinalDecisionSummary({
+    decision: finalStatus,
+    staffUser: interaction.user,
+    reason,
+    comments,
+    nextSteps,
+    canReapply,
+    strikeRemovalResult
+  }));
+
+  const logDetails = [
+    `Reason: ${reason}`,
+    comments && comments !== 'None provided.' ? `Comments: ${comments}` : null,
+    isApproval && nextSteps && nextSteps !== 'None provided.' ? `Next steps: ${nextSteps}` : null,
+    !isApproval ? `Can reapply: ${canReapply}` : null,
+    strikeRemovalResult ? `Strike role action: ${strikeRemovalResult.message}` : null
+  ].filter(Boolean).join('\n');
+
   await sendAppealLog({
     guild: interaction.guild,
     serverConfig,
@@ -632,11 +648,108 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     officerUser,
     staffUser: interaction.user,
     dmSent,
-    details: reason
+    details: logDetails || reason
   });
 
-  await interaction.editReply(`Appeal ${isApproval ? 'approved' : 'denied'}.`);
+  const closeResult = await closeAppealThread(interaction.channel, serverConfig, finalStatus);
+
+  await interaction.editReply([
+    `Appeal ${finalStatus}.`,
+    formatCloseResultForReply(closeResult)
+  ].filter(Boolean).join('\n'));
   return true;
+}
+
+function buildFinalDecisionSummary({ decision, staffUser, reason, comments, nextSteps, canReapply, strikeRemovalResult }) {
+  const isApproval = decision === 'approved';
+  return [
+    `Appeal ${decision} by ${staffUser}.`,
+    '',
+    `**Reason:**\n${reason}`,
+    '',
+    `**Comments/notes:**\n${comments}`,
+    ...(isApproval ? ['', `**Next steps/actions:**\n${nextSteps}`] : ['', `**Can reapply:**\n${canReapply}`]),
+    ...(strikeRemovalResult ? ['', `**Strike role action:**\n${strikeRemovalResult.message}`] : []),
+    '',
+    '_This is the final appeal decision. This thread will be marked closed, locked, and archived._'
+  ].join('\n');
+}
+
+async function removeStrikeRole({ guild, serverConfig, officerId, strikeLevel, appealId }) {
+  const configuredRoleId = strikeLevel ? serverConfig?.appeals?.strikeRoleIds?.[strikeLevel] : null;
+
+  if (!strikeLevel) {
+    return {
+      removed: false,
+      message: 'No strike role was removed because the strike level was not available on this appeal.'
+    };
+  }
+
+  if (!isConfiguredId(configuredRoleId)) {
+    return {
+      removed: false,
+      strikeLevel,
+      message: `No strike role was removed because no role is configured for strike level ${strikeLevel}.`
+    };
+  }
+
+  const member = await fetchGuildMember(guild, officerId);
+  if (!member) {
+    return {
+      removed: false,
+      strikeLevel,
+      roleId: configuredRoleId,
+      message: `No strike role was removed because the officer could not be found in the guild for strike level ${strikeLevel}.`
+    };
+  }
+
+  if (!member.roles?.cache?.has(configuredRoleId)) {
+    return {
+      removed: false,
+      strikeLevel,
+      roleId: configuredRoleId,
+      message: `No strike role was found on the officer for strike level ${strikeLevel} (<@&${configuredRoleId}>).`
+    };
+  }
+
+  try {
+    await member.roles.remove(configuredRoleId, `Strike appeal ${appealId} approved; removing strike level ${strikeLevel}.`);
+    return {
+      removed: true,
+      strikeLevel,
+      roleId: configuredRoleId,
+      message: `Removed strike level ${strikeLevel} role <@&${configuredRoleId}> from the officer.`
+    };
+  } catch (error) {
+    console.warn(`Could not remove strike level ${strikeLevel} role ${configuredRoleId} from ${officerId}:`, error);
+    return {
+      removed: false,
+      strikeLevel,
+      roleId: configuredRoleId,
+      message: `No strike role was removed because removing strike level ${strikeLevel} role <@&${configuredRoleId}> failed.`
+    };
+  }
+}
+
+async function getStrikeLevelFromThread(thread) {
+  const starterContent = await fetchThreadStarterContent(thread);
+  const match = starterContent?.match(/^Strike Level:\s*(\d+)/im);
+  return match ? Number(match[1]) : null;
+}
+
+async function fetchThreadStarterContent(thread) {
+  if (!thread) return '';
+
+  try {
+    if (typeof thread.fetchStarterMessage === 'function') {
+      const starterMessage = await thread.fetchStarterMessage();
+      return starterMessage?.content || '';
+    }
+  } catch (error) {
+    console.warn(`Could not fetch appeal starter message for thread ${thread.id}:`, error);
+  }
+
+  return '';
 }
 
 async function sendDecisionDm({ officerUser, serverConfig, appealType, appealId, decision, reason, comments, nextSteps, canReapply }) {
@@ -709,7 +822,7 @@ function getAppealAnswers(interaction, typeConfig) {
   }));
 }
 
-function buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers }) {
+function buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel }) {
   const timestamp = Math.floor(submittedAt.getTime() / 1000);
   const lines = [
     `A ${appealType} appeal has been submitted. Please review the information below.`,
@@ -718,6 +831,7 @@ function buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, a
     `Officer ID: ${officerId}`,
     `Appeal Type: ${appealType}`,
     `Appeal ID: ${appealId}`,
+    ...(strikeLevel ? [`Strike Level: ${strikeLevel}`] : []),
     `Submitted At: <t:${timestamp}:F>`,
     '',
     '**Appeal Answers**'
@@ -822,6 +936,64 @@ async function updateAppealTags(thread, serverConfig, addTagNames, removeTagName
   }
 }
 
+async function closeAppealThread(thread, serverConfig, finalStatus) {
+  const result = {
+    tagsApplied: false,
+    locked: false,
+    archived: false,
+    errors: []
+  };
+
+  result.tagsApplied = await updateAppealTags(
+    thread,
+    serverConfig,
+    [finalStatus, 'closed'],
+    ['pending', 'underReview', 'infoNeeded']
+  );
+
+  if (!result.tagsApplied) {
+    result.errors.push('Could not apply final/closed appeal tags.');
+    await safeThreadSend(thread, 'Warning: this appeal was finalized, but the bot could not apply the final/closed forum tags automatically.');
+  }
+
+  if (thread && typeof thread.setLocked === 'function') {
+    try {
+      await thread.setLocked(true, `Appeal ${finalStatus}.`);
+      result.locked = true;
+    } catch (error) {
+      const warning = `Could not lock appeal thread ${thread.id}:`;
+      console.warn(warning, error);
+      result.errors.push('Could not lock the appeal thread.');
+      await safeThreadSend(thread, 'Warning: this appeal was finalized, but the bot could not lock this thread automatically.');
+    }
+  } else {
+    result.errors.push('This channel does not support thread locking.');
+  }
+
+  if (thread && typeof thread.setArchived === 'function') {
+    try {
+      await thread.setArchived(true, `Appeal ${finalStatus}.`);
+      result.archived = true;
+    } catch (error) {
+      const warning = `Could not archive appeal thread ${thread.id}:`;
+      console.warn(warning, error);
+      result.errors.push('Could not archive the appeal thread.');
+      await safeThreadSend(thread, 'Warning: this appeal was finalized, but the bot could not archive this thread automatically.');
+    }
+  } else {
+    result.errors.push('This channel does not support thread archiving.');
+  }
+
+  return result;
+}
+
+function formatCloseResultForReply(result) {
+  if (!result) return '';
+
+  const warnings = result.errors?.length ? ` Warnings: ${result.errors.join(' ')}` : '';
+  return `Thread close result: tags ${result.tagsApplied ? 'applied' : 'not applied'}, locked ${result.locked ? 'yes' : 'no'}, archived ${result.archived ? 'yes' : 'no'}.${warnings}`;
+}
+
 function getConfiguredTagId(serverConfig, tagName) {
   const tagId = serverConfig?.appeals?.tags?.[tagName];
   return isConfiguredId(tagId) ? tagId : null;
@@ -849,6 +1021,11 @@ async function safeThreadSend(thread, content) {
     console.warn(`Could not send appeal thread message to ${thread.id}:`, error);
     return false;
   }
+}
+
+function getStrikeLevelFromCaseId(caseId) {
+  const match = String(caseId || '').match(/^st([123])-/i);
+  return match ? Number(match[1]) : null;
 }
 
 function generateAppealId() {
