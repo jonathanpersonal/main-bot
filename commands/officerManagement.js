@@ -7,6 +7,7 @@ const {
 } = require('discord.js');
 
 const { getServerConfig } = require('../utils/configUtils');
+const { sendOfficerRankChangeLog } = require('../utils/logUtils');
 
 const {
   getMemberRank,
@@ -363,6 +364,17 @@ async function handlePromotionOrDemotion({
       targetRank,
       auditReason
     );
+
+    await sendOfficerRankChangeLog({
+      guild: interaction.guild,
+      serverConfig,
+      actionType,
+      officerUser,
+      staffUser: interaction.user,
+      oldRank: currentRank,
+      newRank: targetRank,
+      changedAt: new Date()
+    });
 
     return interaction.editReply({
       content: [

@@ -10,6 +10,10 @@ module.exports = {
     ticketLogs: null
   },
 
+  logging: {
+    staffLogChannelId: '1513565727045718117'
+  },
+
   roles: {
     departmentMemberRoleId: null,
     previousOfficerRoleId: null
