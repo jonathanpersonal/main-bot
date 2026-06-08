@@ -18,8 +18,8 @@ module.exports = {
   ranks: [
     {
       name: 'Cadet',
-      rankRoleId: 'PASTE_CADET_ROLE_ID_HERE',
-      permissionRoleId: 'PASTE_CADET_PERMISSION_ROLE_ID_HERE',
+      rankRoleId: '1513552137131524288',
+      permissionRoleId: '1513552154538020884',
       level: 1
     },
     {
