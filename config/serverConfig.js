@@ -81,22 +81,22 @@ Regards,
     forumChannelId: 'PUT_APPEALS_FORUM_CHANNEL_ID_HERE',
 
     reviewerRoleIds: [
-      'PUT_IA_OR_COMMAND_REVIEWER_ROLE_ID_HERE'
+      '1513618583530508298'
     ],
 
     supervisorRoleIds: [
-      'PUT_IA_SUPERVISOR_ROLE_ID_HERE'
+      '1513618608134291458'
     ],
 
     commandRoleId: 'PUT_DEPARTMENT_COMMAND_ROLE_ID_HERE',
 
     tags: {
-      pending: 'PUT_PENDING_FORUM_TAG_ID_HERE',
-      underReview: 'PUT_UNDER_REVIEW_FORUM_TAG_ID_HERE',
-      infoNeeded: 'PUT_INFO_NEEDED_FORUM_TAG_ID_HERE',
-      approved: 'PUT_APPROVED_FORUM_TAG_ID_HERE',
-      denied: 'PUT_DENIED_FORUM_TAG_ID_HERE',
-      closed: 'PUT_CLOSED_FORUM_TAG_ID_HERE'
+      pending: '1513618818449018990',
+      underReview: '1513618859465375774',
+      infoNeeded: '1513618901710405784',
+      approved: '1513618936585912470',
+      denied: '1513618966961197086',
+      closed: '1513619004315402333'
     },
 
     responseTargets: {
