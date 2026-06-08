@@ -15,6 +15,20 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isAutocomplete()) {
+    const command = client.commands.get(interaction.commandName);
+
+    if (!command || !command.autocomplete) return;
+
+    try {
+      await command.autocomplete(interaction, client);
+    } catch (error) {
+      console.error(`Error running autocomplete for /${interaction.commandName}:`, error);
+    }
+
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);

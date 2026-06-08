@@ -56,6 +56,7 @@ module.exports = {
         .setName('new_rank')
         .setDescription('The new configured rank name. Example: Officer')
         .setRequired(false)
+        .setAutocomplete(true)
     )
     .addStringOption((option) =>
       option
@@ -63,6 +64,42 @@ module.exports = {
         .setDescription('Reason for this officer management action.')
         .setRequired(false)
     ),
+
+  async autocomplete(interaction) {
+    const serverConfig = getServerConfig();
+    const action = interaction.options.getString('action');
+    const officerUser = interaction.options.getUser('officer');
+    const focusedValue = interaction.options.getFocused().toLowerCase();
+
+    let availableRanks = Array.isArray(serverConfig.ranks)
+      ? [...serverConfig.ranks]
+      : [];
+
+    if (interaction.guild && officerUser && ['promote', 'demote'].includes(action)) {
+      try {
+        const officerMember = await interaction.guild.members.fetch(officerUser.id);
+        const currentRank = getMemberRank(officerMember, serverConfig);
+
+        if (currentRank) {
+          availableRanks = action === 'promote'
+            ? getNextHigherRanks(currentRank, serverConfig)
+            : getNextLowerRanks(currentRank, serverConfig);
+        }
+      } catch (error) {
+        console.error('Could not fetch officer for rank autocomplete:', error);
+      }
+    }
+
+    const choices = availableRanks
+      .filter((rank) => rank.name.toLowerCase().includes(focusedValue))
+      .slice(0, 25)
+      .map((rank) => ({
+        name: `${rank.name} (Level ${rank.level})`,
+        value: rank.name
+      }));
+
+    return interaction.respond(choices);
+  },
 
   async execute(interaction) {
     const serverConfig = getServerConfig();
