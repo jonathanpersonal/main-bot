@@ -27,7 +27,7 @@ module.exports = {
     appealWindow: '48 hours',
 
     appealButton: {
-      enabled: true,
+      enabled: false,
       label: 'Appeal Decision'
     },
 
