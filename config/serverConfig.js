@@ -19,6 +19,21 @@ module.exports = {
     previousOfficerRoleId: null
   },
 
+  officerManagement: {
+    previousOfficerRoleId: 'PUT_PREVIOUS_OFFICER_ROLE_ID_HERE',
+
+    extraDepartmentRoleIds: [
+      // Optional department roles that are not rank roles or permission roles.
+      // Example: department member role, trainee role, certified role, etc.
+    ],
+
+    dmMessages: {
+      termination: 'You have been terminated from {departmentName}. Reason: {reason}',
+      resignation: 'Your resignation from {departmentName} has been processed. Reason/notes: {reason}',
+      strike: 'You have received a level {strikeLevel} strike in {departmentName}. Reason: {reason}'
+    }
+  },
+
   ranks: [
     {
       name: 'Cadet',
