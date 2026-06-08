@@ -11,6 +11,7 @@ const {
 } = require('discord.js');
 
 const { getServerConfig } = require('../utils/configUtils');
+const { buildAppealStartButtonRow } = require('../utils/appealUtils');
 const {
   sendOfficerActionLog,
   sendOfficerRankChangeLog
@@ -858,7 +859,12 @@ async function trySendOfficerDm({ officerUser, serverConfig, action, details, st
     };
   }
 
-  const appealButtonRow = buildAppealButtonRow(serverConfig, action);
+  const appealButtonRow = buildAppealButtonRow({
+    serverConfig,
+    action,
+    officerId: officerUser.id,
+    caseId: createCaseId(action)
+  });
   const messageOptions = {
     content: formatDmMessage(template, buildDmPlaceholderValues({
       officerUser,
@@ -935,26 +941,24 @@ function buildReapplyInstructions({ canReapply, blacklisted, reapplyWaitPeriod }
   return 'At this time, you are not permitted to reapply. Because you are currently blacklisted, you must successfully appeal your blacklist before any future application would be considered.';
 }
 
-function buildAppealButtonRow(serverConfig, action) {
+function buildAppealButtonRow({ serverConfig, action, officerId, caseId }) {
   if (!['termination', 'strike'].includes(action)) return null;
 
-  const appealButtonConfig = serverConfig?.officerManagement?.appealButton;
-
-  if (!appealButtonConfig?.enabled) {
-    return null;
-  }
-
   try {
-    return new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`officer_mgmt_appeal_start:${createStateKey()}`)
-        .setLabel(appealButtonConfig.label || 'Appeal Decision')
-        .setStyle(ButtonStyle.Primary)
-    );
+    return buildAppealStartButtonRow({
+      serverConfig,
+      appealType: action,
+      officerId,
+      caseId
+    });
   } catch (error) {
     console.warn('Could not build officer management appeal button:', error);
     return null;
   }
+}
+
+function createCaseId(action) {
+  return `${action.slice(0, 2)}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
 function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent, appealButtonIncluded }) {

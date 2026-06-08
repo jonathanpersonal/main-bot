@@ -81,6 +81,75 @@ async function sendOfficerActionLog({
   });
 }
 
+
+async function sendAppealLog({
+  guild,
+  serverConfig,
+  action,
+  appealType,
+  appealId,
+  officerUser,
+  staffUser,
+  dmSent,
+  details,
+  changedAt = new Date()
+}) {
+  const fields = [
+    {
+      name: 'Appeal ID',
+      value: safeFieldValue(appealId),
+      inline: true
+    },
+    {
+      name: 'Appeal type',
+      value: safeFieldValue(appealType),
+      inline: true
+    },
+    {
+      name: 'Officer',
+      value: formatUserForLog(officerUser),
+      inline: true
+    }
+  ];
+
+  if (staffUser) {
+    fields.push({
+      name: 'Staff member',
+      value: formatUserForLog(staffUser),
+      inline: true
+    });
+  }
+
+  if (typeof dmSent === 'boolean') {
+    fields.push({
+      name: 'DM sent',
+      value: dmSent ? 'Yes' : 'No',
+      inline: true
+    });
+  }
+
+  if (details) {
+    fields.push({
+      name: 'Details',
+      value: safeFieldValue(details),
+      inline: false
+    });
+  }
+
+  fields.push(...getDepartmentAndTimeFields(serverConfig, changedAt));
+
+  return sendStaffLogEmbed({
+    guild,
+    serverConfig,
+    embed: new EmbedBuilder()
+      .setTitle(action || 'Appeal Update')
+      .setColor(0x5865f2)
+      .addFields(fields)
+      .setTimestamp(changedAt),
+    warningLabel: 'appeal staff log'
+  });
+}
+
 async function sendStaffLogEmbed({ guild, serverConfig, embed, warningLabel }) {
   const staffLogChannelId = serverConfig?.logging?.staffLogChannelId;
 
@@ -284,6 +353,7 @@ function formatUserForLog(user) {
 }
 
 module.exports = {
+  sendAppealLog,
   sendOfficerActionLog,
   sendOfficerRankChangeLog
 };

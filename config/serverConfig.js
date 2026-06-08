@@ -27,7 +27,7 @@ module.exports = {
     appealWindow: '48 hours',
 
     appealButton: {
-      enabled: false,
+      enabled: true,
       label: 'Appeal Decision'
     },
 
@@ -71,6 +71,95 @@ Steps to prevent this from happening again: {preventionSteps}
 
 Regards,
 {commandTeamName}`
+    }
+  },
+
+
+  appeals: {
+    enabled: true,
+
+    forumChannelId: 'PUT_APPEALS_FORUM_CHANNEL_ID_HERE',
+
+    reviewerRoleIds: [
+      'PUT_IA_OR_COMMAND_REVIEWER_ROLE_ID_HERE'
+    ],
+
+    supervisorRoleIds: [
+      'PUT_IA_SUPERVISOR_ROLE_ID_HERE'
+    ],
+
+    commandRoleId: 'PUT_DEPARTMENT_COMMAND_ROLE_ID_HERE',
+
+    tags: {
+      pending: 'PUT_PENDING_FORUM_TAG_ID_HERE',
+      underReview: 'PUT_UNDER_REVIEW_FORUM_TAG_ID_HERE',
+      infoNeeded: 'PUT_INFO_NEEDED_FORUM_TAG_ID_HERE',
+      approved: 'PUT_APPROVED_FORUM_TAG_ID_HERE',
+      denied: 'PUT_DENIED_FORUM_TAG_ID_HERE',
+      closed: 'PUT_CLOSED_FORUM_TAG_ID_HERE'
+    },
+
+    responseTargets: {
+      aimToRespondWithin: '72 hours',
+      aimToResolveWithin: '5-7 days'
+    },
+
+    messages: {
+      instructionsTitle: 'Appeal Instructions',
+      appealReceived: 'Your appeal has been submitted and is pending review.',
+      underReview: 'Your appeal is now under review.',
+      infoRequested: 'Additional information is needed for your appeal.',
+      approvedTermination: `Dear {officerName},
+
+Thank you for appealing your termination. We have reviewed your appeal and have approved your appeal.
+
+Please review the directions below to ensure you are reinstated correctly:
+
+1. Open a Command Ticket and choose Appeal Reinstatement as the reason.
+2. Follow all prompts. When asked for your appeal ID, provide the following:
+
+{appealId}
+
+3. A member of the Internal Affairs or Command Team will assist you further.
+
+Thank you,
+Internal Affairs Team`,
+      deniedTermination: `Dear {officerName},
+
+Thank you for appealing your termination. We have reviewed your appeal and are unable to approve your appeal for the following reason:
+
+{denialReason}
+
+Can you reapply as an officer: {canReapply}
+
+Please note that appeals are final. All information regarding your appeal is stored in the system in case there are further issues that need to be addressed. If specified above, you may apply again after the configured waiting period. Please note this decision only relates to your appeal and does not relate to any other items or matters.
+
+Regards,
+Internal Affairs Team`,
+      approvedStrike: `Dear {officerName},
+
+Thank you for appealing your strike. We have reviewed your appeal and have approved your appeal.
+
+Your strike has been overturned.
+
+Reason:
+{approvalReason}
+
+Next steps:
+{nextSteps}
+
+Regards,
+Internal Affairs Team`,
+      deniedStrike: `Dear {officerName},
+
+Thank you for appealing your strike. We have reviewed your appeal and are unable to approve your appeal for the following reason:
+
+{denialReason}
+
+Please note that appeals are final. All information regarding your appeal is stored in the system in case there are further issues that need to be addressed.
+
+Regards,
+Internal Affairs Team`
     }
   },
 

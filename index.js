@@ -3,6 +3,7 @@ require('dotenv').config();
 const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const { loadCommands } = require('./handlers/commandHandler');
 const { validateServerConfig } = require('./utils/configUtils');
+const { handleAppealInteraction } = require('./utils/appealUtils');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -15,6 +16,17 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton() || interaction.isModalSubmit()) {
+    try {
+      const wasAppealInteraction = await handleAppealInteraction(interaction, client);
+      if (wasAppealInteraction) return;
+    } catch (error) {
+      console.error('Error handling appeal interaction:', error);
+      await sendInteractionError(interaction);
+      return;
+    }
+  }
+
   if (interaction.isAutocomplete()) {
     const command = client.commands.get(interaction.commandName);
 

@@ -4,9 +4,11 @@ const path = require('path');
 const rootDir = path.join(__dirname, '..');
 const commandPath = path.join(rootDir, 'commands', 'officerManagement.js');
 const configPath = path.join(rootDir, 'config', 'serverConfig.js');
+const appealUtilsPath = path.join(rootDir, 'utils', 'appealUtils.js');
 
 const commandSource = fs.readFileSync(commandPath, 'utf8');
 const configSource = fs.readFileSync(configPath, 'utf8');
+const appealUtilsSource = fs.readFileSync(appealUtilsPath, 'utf8');
 
 const prohibitedSlashOptions = [
   'new_rank',
@@ -48,9 +50,9 @@ assertDoesNotMatch(
 );
 
 assertMatches(
-  commandSource,
-  /officer_mgmt_appeal_start:/,
-  'Appeal button must use officer_mgmt_appeal_start custom ID.'
+  `${commandSource}\n${appealUtilsSource}`,
+  /appeal_start:\$\{appealType\}:\$\{officerId\}:\$\{caseId\}/,
+  'Appeal button must use the reusable appeal_start custom ID.'
 );
 
 assertDoesNotMatch(
