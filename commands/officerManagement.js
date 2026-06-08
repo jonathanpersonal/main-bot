@@ -762,6 +762,7 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
   let roleResult = null;
   let previousRoleResult = null;
   let dmSent = false;
+  let appealButtonIncluded = false;
 
   if (state.action === 'termination' || state.action === 'resignation') {
     const auditReason = `${ACTION_LABELS[state.action]} processed by ${interaction.user.tag}. Reason: ${state.details.reason}`;
@@ -814,23 +815,27 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
       });
     }
 
-    dmSent = await trySendOfficerDm({
+    const dmResult = await trySendOfficerDm({
       officerUser,
       serverConfig,
       action: state.action,
       details: state.details,
       strikeLevel: state.strikeLevel
     });
+    dmSent = dmResult.sent;
+    appealButtonIncluded = dmResult.appealButtonIncluded;
   }
 
   if (state.action === 'strike') {
-    dmSent = await trySendOfficerDm({
+    const dmResult = await trySendOfficerDm({
       officerUser,
       serverConfig,
       action: state.action,
       details: state.details,
       strikeLevel: state.strikeLevel
     });
+    dmSent = dmResult.sent;
+    appealButtonIncluded = dmResult.appealButtonIncluded;
   }
 
   await sendOfficerActionLog({
@@ -844,6 +849,7 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
       strikeLevel: state.strikeLevel
     },
     dmSent: state.action === 'coaching' ? undefined : dmSent,
+    appealButtonIncluded,
     changedAt
   });
 
@@ -857,7 +863,8 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
       officerUser,
       roleResult,
       previousRoleResult,
-      dmSent
+      dmSent,
+      appealButtonIncluded
     }),
     components: []
   });
@@ -866,26 +873,122 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
 async function trySendOfficerDm({ officerUser, serverConfig, action, details, strikeLevel }) {
   const template = serverConfig?.officerManagement?.dmMessages?.[action];
 
-  if (!template) return false;
+  if (!template) {
+    return {
+      sent: false,
+      appealButtonIncluded: false
+    };
+  }
+
+  const appealButtonRow = buildAppealButtonRow(serverConfig, action);
+  const messageOptions = {
+    content: formatDmMessage(template, buildDmPlaceholderValues({
+      officerUser,
+      serverConfig,
+      details,
+      strikeLevel
+    }))
+  };
+
+  if (appealButtonRow) {
+    messageOptions.components = [appealButtonRow];
+  }
 
   try {
-    await officerUser.send(formatDmMessage(template, {
-      departmentName: serverConfig?.departmentName || 'the department',
-      reason: details.reason || 'No reason provided.',
-      strikeLevel: strikeLevel || ''
-    }));
-    return true;
+    await officerUser.send(messageOptions);
+    return {
+      sent: true,
+      appealButtonIncluded: Boolean(appealButtonRow)
+    };
   } catch (error) {
     console.warn(`Could not DM officer for ${action}:`, error);
-    return false;
+    return {
+      sent: false,
+      appealButtonIncluded: false
+    };
   }
 }
 
 function formatDmMessage(template, values) {
-  return template.replace(/\{(departmentName|reason|strikeLevel)\}/g, (match, key) => values[key] ?? match);
+  return template.replace(/\{([a-zA-Z]+)\}/g, (match, key) => values[key] ?? match);
 }
 
-function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent }) {
+function buildDmPlaceholderValues({ officerUser, serverConfig, details, strikeLevel }) {
+  const officerManagementConfig = serverConfig?.officerManagement || {};
+  const departmentName = officerManagementConfig.departmentName
+    || serverConfig?.departmentName
+    || 'the department';
+  const reapplyWaitPeriod = officerManagementConfig.reapplyWaitPeriod || 'the configured wait period';
+  const canReapply = details.canReapply ? 'Yes' : 'No';
+  const blacklisted = details.blacklisted ? 'Yes' : 'No';
+
+  return {
+    officerName: officerUser.globalName || officerUser.username || officerUser.tag || String(officerUser.id),
+    departmentName,
+    commandTeamName: officerManagementConfig.commandTeamName || `${departmentName} Command Team`,
+    reason: details.reason || 'No reason provided.',
+    canReapply,
+    blacklisted,
+    reapplyWaitPeriod,
+    appealWindow: officerManagementConfig.appealWindow || 'the configured appeal window',
+    strikeLevel: strikeLevel || '',
+    preventionSteps: details.nextSteps || 'None provided.',
+    reapplyInstructions: buildReapplyInstructions({
+      canReapply: details.canReapply,
+      blacklisted: details.blacklisted,
+      reapplyWaitPeriod
+    })
+  };
+}
+
+function buildReapplyInstructions({ canReapply, blacklisted, reapplyWaitPeriod }) {
+  if (canReapply && !blacklisted) {
+    return `Please note that you must wait ${reapplyWaitPeriod} before you are permitted to reapply.`;
+  }
+
+  if (canReapply && blacklisted) {
+    return `Please note that you must wait ${reapplyWaitPeriod} before you are permitted to reapply. Because you are currently blacklisted, you must successfully appeal your blacklist before applying again.`;
+  }
+
+  if (!canReapply && !blacklisted) {
+    return 'At this time, you are not permitted to reapply unless this decision is changed through the appeal process.';
+  }
+
+  return 'At this time, you are not permitted to reapply. Because you are currently blacklisted, you must successfully appeal your blacklist before any future application would be considered.';
+}
+
+function buildAppealButtonRow(serverConfig, action) {
+  if (!['termination', 'strike'].includes(action)) return null;
+
+  const appealButtonConfig = serverConfig?.officerManagement?.appealButton;
+
+  if (!appealButtonConfig?.enabled || !isConfiguredLinkUrl(appealButtonConfig.url)) {
+    return null;
+  }
+
+  try {
+    return new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel(appealButtonConfig.label || 'Appeal Decision')
+        .setStyle(ButtonStyle.Link)
+        .setURL(appealButtonConfig.url)
+    );
+  } catch (error) {
+    console.warn('Could not build officer management appeal button:', error);
+    return null;
+  }
+}
+
+function isConfiguredLinkUrl(url) {
+  return (
+    typeof url === 'string' &&
+    /^https?:\/\//i.test(url) &&
+    !url.startsWith('PUT_') &&
+    !url.startsWith('PASTE_')
+  );
+}
+
+function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent, appealButtonIncluded }) {
   const lines = [
     `${ACTION_LABELS[state.action]} completed for ${officerUser}.`,
     '',
@@ -898,12 +1001,17 @@ function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResul
       `Previous Officer Role Added: ${previousRoleResult.added ? previousRoleResult.roleName : 'No'}`,
       `DM sent: ${dmSent ? 'Yes' : 'No'}`
     );
+
+    if (state.action === 'termination') {
+      lines.push(`Appeal button included: ${appealButtonIncluded ? 'Yes' : 'No'}`);
+    }
   }
 
   if (state.action === 'strike') {
     lines.push(
       `Strike Level: ${state.strikeLevel}`,
-      `DM sent: ${dmSent ? 'Yes' : 'No'}`
+      `DM sent: ${dmSent ? 'Yes' : 'No'}`,
+      `Appeal button included: ${appealButtonIncluded ? 'Yes' : 'No'}`
     );
   }
 

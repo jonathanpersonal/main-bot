@@ -20,7 +20,17 @@ module.exports = {
   },
 
   officerManagement: {
+    departmentName: 'Hosted Testing Department',
+    commandTeamName: 'Hosted Testing Department Command Team',
     previousOfficerRoleId: 'PUT_PREVIOUS_OFFICER_ROLE_ID_HERE',
+    reapplyWaitPeriod: '7 days',
+    appealWindow: '48 hours',
+
+    appealButton: {
+      enabled: true,
+      label: 'Appeal Decision',
+      url: 'PUT_APPEAL_FORM_OR_TICKET_URL_HERE'
+    },
 
     extraDepartmentRoleIds: [
       // Optional department roles that are not rank roles or permission roles.
@@ -28,9 +38,40 @@ module.exports = {
     ],
 
     dmMessages: {
-      termination: 'You have been terminated from {departmentName}. Reason: {reason}',
-      resignation: 'Your resignation from {departmentName} has been processed. Reason/notes: {reason}',
-      strike: 'You have received a level {strikeLevel} strike in {departmentName}. Reason: {reason}'
+      termination: `Dear {officerName},
+
+This message is to inform you that your employment within {departmentName} has been terminated. Please see the information below.
+
+If you wish to appeal, you have up to {appealWindow} to do so.
+
+Reason: {reason}
+Able to reapply: {canReapply}
+Blacklisted: {blacklisted}
+
+{reapplyInstructions}
+
+Regards,
+{commandTeamName}`,
+      resignation: `Dear {officerName},
+
+This message is to confirm that your resignation from {departmentName} has been processed.
+
+We thank you for your service. You are welcome to reapply after a waiting period of {reapplyWaitPeriod}.
+
+Regards,
+{commandTeamName}`,
+      strike: `Dear {officerName},
+
+You have been issued a strike. Please see the information below regarding the details of your strike.
+
+If you wish to appeal, you have up to {appealWindow} from now to do so.
+
+Strike Level: {strikeLevel}
+Reason for Strike: {reason}
+Steps to prevent this from happening again: {preventionSteps}
+
+Regards,
+{commandTeamName}`
     }
   },
 
