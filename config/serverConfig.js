@@ -78,7 +78,7 @@ Regards,
   appeals: {
     enabled: true,
 
-    forumChannelId: '',
+    forumChannelId: '1513618559949865100',
 
     reviewerRoleIds: [
       '1513618583530508298'
