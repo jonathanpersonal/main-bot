@@ -4,7 +4,8 @@
   "description": "Reusable Discord Department Management Bot template",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "verify:officer-command": "node scripts/verifyOfficerCommandSchema.js"
   },
   "dependencies": {
     "discord.js": "^14.0.0",

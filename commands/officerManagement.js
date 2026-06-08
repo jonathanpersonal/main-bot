@@ -36,6 +36,8 @@ const pendingOfficerActions = new Map();
 const OFFICER_ACTIONS_WITH_MODALS = ['termination', 'resignation', 'coaching', 'strike'];
 
 const ACTION_LABELS = {
+  promote: 'Promotion',
+  demote: 'Demotion',
   termination: 'Termination',
   resignation: 'Resignation',
   coaching: 'Coaching',
@@ -88,85 +90,13 @@ module.exports = {
         .setName('officer')
         .setDescription('The officer to manage.')
         .setRequired(true)
-    )
-    .addStringOption((option) =>
-      option
-        .setName('new_rank')
-        .setDescription('The new configured rank name. Example: Officer')
-        .setRequired(false)
-        .setAutocomplete(true)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName('strike_level')
-        .setDescription('Required for Strike actions.')
-        .setRequired(false)
-        .addChoices(
-          {
-            name: '1',
-            value: 1
-          },
-          {
-            name: '2',
-            value: 2
-          },
-          {
-            name: '3',
-            value: 3
-          }
-        )
-    )
-    .addStringOption((option) =>
-      option
-        .setName('reason')
-        .setDescription('Reason for this officer management action.')
-        .setRequired(false)
     ),
-
-  async autocomplete(interaction) {
-    const serverConfig = getServerConfig();
-    const action = interaction.options.getString('action');
-    const officerUser = interaction.options.getUser('officer');
-    const focusedValue = interaction.options.getFocused().toLowerCase();
-
-    let availableRanks = Array.isArray(serverConfig.ranks)
-      ? [...serverConfig.ranks]
-      : [];
-
-    if (interaction.guild && officerUser && ['promote', 'demote'].includes(action)) {
-      try {
-        const officerMember = await interaction.guild.members.fetch(officerUser.id);
-        const currentRank = getMemberRank(officerMember, serverConfig);
-
-        if (currentRank) {
-          availableRanks = action === 'promote'
-            ? getNextHigherRanks(currentRank, serverConfig)
-            : getNextLowerRanks(currentRank, serverConfig);
-        }
-      } catch (error) {
-        console.error('Could not fetch officer for rank autocomplete:', error);
-      }
-    }
-
-    const choices = availableRanks
-      .filter((rank) => rank.name.toLowerCase().includes(focusedValue))
-      .slice(0, 25)
-      .map((rank) => ({
-        name: `${rank.name} (Level ${rank.level})`,
-        value: rank.name
-      }));
-
-    return interaction.respond(choices);
-  },
 
   async execute(interaction) {
     const serverConfig = getServerConfig();
 
     const action = interaction.options.getString('action');
     const officerUser = interaction.options.getUser('officer');
-    const newRankName = interaction.options.getString('new_rank');
-    const reason = interaction.options.getString('reason') || 'No reason provided.';
-    const strikeLevel = interaction.options.getInteger('strike_level');
 
     if (!interaction.guild) {
       return interaction.reply({
@@ -223,16 +153,14 @@ module.exports = {
         officerUser,
         officerMember,
         currentRank,
-        newRankName,
-        reason,
         actionType: action
       });
     }
 
-    if (action === 'strike' && !strikeLevel) {
-      return interaction.reply({
-        content: 'Strike requires `strike_level`. Please choose strike level 1, 2, or 3 and run the command again.',
-        ephemeral: true
+    if (action === 'strike') {
+      return showStrikeLevelSelect({
+        interaction,
+        officerUser
       });
     }
 
@@ -240,8 +168,7 @@ module.exports = {
       return showOfficerActionModal({
         interaction,
         action,
-        officerUser,
-        strikeLevel
+        officerUser
       });
     }
 
@@ -304,6 +231,38 @@ module.exports = {
 
     const selectedValue = interaction.values[0];
 
+    if (selectType === 'rank') {
+      const targetRank = getRankByName(selectedValue, getServerConfig());
+
+      if (!targetRank) {
+        await interaction.update({
+          content: 'That rank is no longer configured. Please run the command again.',
+          components: []
+        });
+        pendingOfficerActions.delete(stateKey);
+        return true;
+      }
+
+      state.targetRankName = targetRank.name;
+      state.targetRankLevel = targetRank.level;
+
+      await interaction.update({
+        content: buildRankChangeConfirmationMessage(state),
+        components: [buildConfirmationRow(stateKey, state.action)]
+      });
+      return true;
+    }
+
+    if (selectType === 'strikeLevel') {
+      state.strikeLevel = Number(selectedValue);
+      return showOfficerActionModal({
+        interaction,
+        action: state.action,
+        officerUser: { id: state.officerUserId },
+        stateKey
+      });
+    }
+
     if (selectType === 'blacklisted') {
       state.details.blacklisted = selectedValue === 'yes';
     }
@@ -359,15 +318,11 @@ async function handlePromotionOrDemotion({
   interaction,
   serverConfig,
   officerUser,
-  officerMember,
   currentRank,
-  newRankName,
-  reason,
   actionType
 }) {
   const isPromotion = actionType === 'promote';
   const actionLabel = isPromotion ? 'Promotion' : 'Demotion';
-  const actionPastTense = isPromotion ? 'promoted' : 'demoted';
 
   const availableRanks = isPromotion
     ? getNextHigherRanks(currentRank, serverConfig)
@@ -387,207 +342,70 @@ async function handlePromotionOrDemotion({
     });
   }
 
-  if (!newRankName) {
-    const rankList = availableRanks
-      .map((rank) => `- **${rank.name}** — Level ${rank.level}`)
-      .join('\n');
-
-    return interaction.reply({
-      content: [
-        `${actionLabel} Preview for ${officerUser}`,
-        '',
-        `Current Rank: **${currentRank.name}**`,
-        `Current Level: **${currentRank.level}**`,
-        '',
-        isPromotion ? 'Available Promotion Ranks:' : 'Available Demotion Ranks:',
-        rankList,
-        '',
-        'No roles were changed.',
-        '',
-        `To actually ${actionType} this officer, run the command again and fill in the \`new_rank\` option.`
-      ].join('\n'),
-      ephemeral: true
-    });
-  }
-
-  const targetRank = getRankByName(newRankName, serverConfig);
-
-  if (!targetRank) {
-    const configuredRanks = serverConfig.ranks
-      .map((rank) => `- ${rank.name}`)
-      .join('\n');
-
-    return interaction.reply({
-      content: [
-        `I could not find a configured rank named **${newRankName}**.`,
-        '',
-        'Configured ranks are:',
-        configuredRanks
-      ].join('\n'),
-      ephemeral: true
-    });
-  }
-
-  if (isPromotion && targetRank.level <= currentRank.level) {
-    return interaction.reply({
-      content: [
-        `Invalid promotion target.`,
-        '',
-        `Current Rank: **${currentRank.name}** — Level ${currentRank.level}`,
-        `Requested Rank: **${targetRank.name}** — Level ${targetRank.level}`,
-        '',
-        'For a promotion, the new rank must be higher than the current rank.'
-      ].join('\n'),
-      ephemeral: true
-    });
-  }
-
-  if (!isPromotion && targetRank.level >= currentRank.level) {
-    return interaction.reply({
-      content: [
-        `Invalid demotion target.`,
-        '',
-        `Current Rank: **${currentRank.name}** — Level ${currentRank.level}`,
-        `Requested Rank: **${targetRank.name}** — Level ${targetRank.level}`,
-        '',
-        'For a demotion, the new rank must be lower than the current rank.'
-      ].join('\n'),
-      ephemeral: true
-    });
-  }
-
-  const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe();
-
-  const roleValidation = validateBotCanManageRankChange(
-    interaction.guild,
-    botMember,
-    currentRank,
-    targetRank
-  );
-
-  if (!roleValidation.canManage) {
-    return interaction.reply({
-      content: [
-        'The bot cannot safely complete this rank change yet.',
-        '',
-        'Fix these first:',
-        ...roleValidation.problems.map((problem) => `- ${problem}`),
-        '',
-        'Most likely fix: move the bot role above all rank and permission roles in Discord Server Settings.'
-      ].join('\n'),
-      ephemeral: true
-    });
-  }
-
-  const confirmButtonId = `confirm_rank_change_${interaction.id}`;
-  const cancelButtonId = `cancel_rank_change_${interaction.id}`;
-
-  const confirmationRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(confirmButtonId)
-      .setLabel(`Confirm ${actionLabel}`)
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(cancelButtonId)
-      .setLabel('Cancel')
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  const response = await interaction.reply({
-    content: [
-      `Please confirm this ${actionLabel.toLowerCase()}:`,
-      '',
-      `Officer: ${officerUser}`,
-      `Current Rank: **${currentRank.name}** — Level ${currentRank.level}`,
-      `New Rank: **${targetRank.name}** — Level ${targetRank.level}`,
-      `Reason: ${reason}`,
-      '',
-      'No roles have been changed yet.'
-    ].join('\n'),
-    components: [confirmationRow],
-    ephemeral: true,
-    fetchReply: true
-  });
-
-  try {
-    const confirmation = await response.awaitMessageComponent({
-      filter: (buttonInteraction) => {
-        return (
-          buttonInteraction.user.id === interaction.user.id &&
-          [confirmButtonId, cancelButtonId].includes(buttonInteraction.customId)
-        );
-      },
-      time: 60000
-    });
-
-    if (confirmation.customId === cancelButtonId) {
-      await confirmation.deferUpdate();
-
-      return interaction.editReply({
-        content: `${actionLabel} cancelled. No roles were changed.`,
-        components: []
-      });
-    }
-
-    await confirmation.deferUpdate();
-
-    const auditReason = `${actionLabel}: ${officerUser.tag} from ${currentRank.name} to ${targetRank.name}. Reason: ${reason}`;
-
-    const result = await changeMemberRank(
-      officerMember,
-      currentRank,
-      targetRank,
-      auditReason
-    );
-
-    await sendOfficerRankChangeLog({
-      guild: interaction.guild,
-      serverConfig,
-      actionType,
-      officerUser,
-      staffUser: interaction.user,
-      oldRank: currentRank,
-      newRank: targetRank,
-      changedAt: new Date()
-    });
-
-    return interaction.editReply({
-      content: [
-        `${officerUser} was successfully ${actionPastTense}.`,
-        '',
-        `Old Rank: **${currentRank.name}**`,
-        `New Rank: **${targetRank.name}**`,
-        `Reason: ${reason}`,
-        '',
-        `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
-        `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`
-      ].join('\n'),
-      components: []
-    });
-  } catch (error) {
-    console.error(`${actionLabel} confirmation failed:`, error);
-
-    return interaction.editReply({
-      content: `${actionLabel} timed out or failed. No roles were changed unless the console shows a role update error.`,
-      components: []
-    });
-  }
-}
-
-async function showOfficerActionModal({ interaction, action, officerUser, strikeLevel }) {
-  const stateKey = `om${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-
+  const stateKey = createStateKey();
   pendingOfficerActions.set(stateKey, {
-    action,
+    action: actionType,
     staffUserId: interaction.user.id,
     officerUserId: officerUser.id,
-    strikeLevel,
+    currentRankName: currentRank.name,
+    currentRankLevel: currentRank.level,
+    createdAt: Date.now()
+  });
+
+  return interaction.reply({
+    content: [
+      `${actionLabel} rank selection for ${officerUser}`,
+      `Officer: ${officerUser}`,
+      `Current Rank: **${currentRank.name}** — Level ${currentRank.level}`,
+      '',
+      isPromotion ? 'Choose a higher rank.' : 'Choose a lower rank.',
+      '',
+      'No roles have been changed.'
+    ].join('\n'),
+    components: [buildRankSelectRow(stateKey, availableRanks)],
+    ephemeral: true
+  });
+}
+
+async function showStrikeLevelSelect({ interaction, officerUser }) {
+  const stateKey = createStateKey();
+
+  pendingOfficerActions.set(stateKey, {
+    action: 'strike',
+    staffUserId: interaction.user.id,
+    officerUserId: officerUser.id,
     createdAt: Date.now(),
     details: {}
   });
 
+  return interaction.reply({
+    content: [
+      `Strike level selection for ${officerUser}`,
+      '',
+      'Choose the strike level.',
+      '',
+      'No DM has been sent and no staff log has been created.'
+    ].join('\n'),
+    components: [buildStrikeLevelSelectRow(stateKey)],
+    ephemeral: true
+  });
+}
+
+async function showOfficerActionModal({ interaction, action, officerUser, stateKey }) {
+  const effectiveStateKey = stateKey || createStateKey();
+
+  if (!pendingOfficerActions.has(effectiveStateKey)) {
+    pendingOfficerActions.set(effectiveStateKey, {
+      action,
+      staffUserId: interaction.user.id,
+      officerUserId: officerUser.id,
+      createdAt: Date.now(),
+      details: {}
+    });
+  }
+
   const modal = new ModalBuilder()
-    .setCustomId(`officerMgmt:modal:${stateKey}`)
+    .setCustomId(`officerMgmt:modal:${effectiveStateKey}`)
     .setTitle(`${ACTION_LABELS[action]} Details`);
 
   getModalTextInputs(action).forEach((input) => {
@@ -595,6 +413,47 @@ async function showOfficerActionModal({ interaction, action, officerUser, strike
   });
 
   return interaction.showModal(modal);
+}
+
+function createStateKey() {
+  return `om${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildRankSelectRow(stateKey, availableRanks) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`officerMgmt:select:${stateKey}:rank`)
+      .setPlaceholder('Choose new rank')
+      .addOptions(
+        ...availableRanks.slice(0, 25).map((rank) => ({
+          label: rank.name,
+          description: `Level ${rank.level}`,
+          value: rank.name
+        }))
+      )
+  );
+}
+
+function buildStrikeLevelSelectRow(stateKey) {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`officerMgmt:select:${stateKey}:strikeLevel`)
+      .setPlaceholder('Choose strike level')
+      .addOptions(
+        {
+          label: 'Strike 1',
+          value: '1'
+        },
+        {
+          label: 'Strike 2',
+          value: '2'
+        },
+        {
+          label: 'Strike 3',
+          value: '3'
+        }
+      )
+  );
 }
 
 function getModalTextInputs(action) {
@@ -715,6 +574,18 @@ function buildConfirmationRow(stateKey, action) {
   );
 }
 
+function buildRankChangeConfirmationMessage(state) {
+  return [
+    `Please confirm this ${ACTION_LABELS[state.action].toLowerCase()}:`,
+    '',
+    `Officer: <@${state.officerUserId}>`,
+    `Current Rank: **${state.currentRankName}** — Level ${state.currentRankLevel}`,
+    `New Rank: **${state.targetRankName}** — Level ${state.targetRankLevel}`,
+    '',
+    'No roles have been changed yet.'
+  ].join('\n');
+}
+
 function buildConfirmationMessage(state) {
   const lines = [
     `Please confirm this ${ACTION_LABELS[state.action].toLowerCase()}:`,
@@ -763,6 +634,18 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
   let previousRoleResult = null;
   let dmSent = false;
   let appealButtonIncluded = false;
+
+  if (state.action === 'promote' || state.action === 'demote') {
+    return confirmRankChange({
+      interaction,
+      serverConfig,
+      state,
+      stateKey,
+      officerUser,
+      officerMember,
+      changedAt
+    });
+  }
 
   if (state.action === 'termination' || state.action === 'resignation') {
     const auditReason = `${ACTION_LABELS[state.action]} processed by ${interaction.user.tag}. Reason: ${state.details.reason}`;
@@ -870,6 +753,101 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
   });
 }
 
+async function confirmRankChange({
+  interaction,
+  serverConfig,
+  state,
+  stateKey,
+  officerUser,
+  officerMember,
+  changedAt
+}) {
+  const currentRank = getMemberRank(officerMember, serverConfig);
+  const targetRank = getRankByName(state.targetRankName, serverConfig);
+  const actionLabel = ACTION_LABELS[state.action];
+  const actionPastTense = state.action === 'promote' ? 'promoted' : 'demoted';
+
+  if (!currentRank || !targetRank) {
+    pendingOfficerActions.delete(stateKey);
+    return interaction.editReply({
+      content: `${actionLabel} could not be completed because the officer rank or selected rank is no longer configured.`,
+      components: []
+    });
+  }
+
+  if (state.action === 'promote' && targetRank.level <= currentRank.level) {
+    pendingOfficerActions.delete(stateKey);
+    return interaction.editReply({
+      content: 'Promotion cancelled because the selected rank is no longer higher than the officer current rank.',
+      components: []
+    });
+  }
+
+  if (state.action === 'demote' && targetRank.level >= currentRank.level) {
+    pendingOfficerActions.delete(stateKey);
+    return interaction.editReply({
+      content: 'Demotion cancelled because the selected rank is no longer lower than the officer current rank.',
+      components: []
+    });
+  }
+
+  const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe();
+  const roleValidation = validateBotCanManageRankChange(
+    interaction.guild,
+    botMember,
+    currentRank,
+    targetRank
+  );
+
+  if (!roleValidation.canManage) {
+    return interaction.editReply({
+      content: [
+        'The bot cannot safely complete this rank change yet.',
+        '',
+        'Fix these first:',
+        ...roleValidation.problems.map((problem) => `- ${problem}`),
+        '',
+        'Most likely fix: move the bot role above all rank and permission roles in Discord Server Settings.'
+      ].join('\n'),
+      components: []
+    });
+  }
+
+  const auditReason = `${actionLabel}: ${officerUser.tag} from ${currentRank.name} to ${targetRank.name}.`;
+  const result = await changeMemberRank(
+    officerMember,
+    currentRank,
+    targetRank,
+    auditReason
+  );
+
+  await sendOfficerRankChangeLog({
+    guild: interaction.guild,
+    serverConfig,
+    actionType: state.action,
+    officerUser,
+    staffUser: interaction.user,
+    oldRank: currentRank,
+    newRank: targetRank,
+    changedAt
+  });
+
+  pendingOfficerActions.delete(stateKey);
+
+  return interaction.editReply({
+    content: [
+      `${officerUser} was successfully ${actionPastTense}.`,
+      '',
+      `Old Rank: **${currentRank.name}**`,
+      `New Rank: **${targetRank.name}**`,
+      '',
+      `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
+      `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`
+    ].join('\n'),
+    components: []
+  });
+}
+
 async function trySendOfficerDm({ officerUser, serverConfig, action, details, strikeLevel }) {
   const template = serverConfig?.officerManagement?.dmMessages?.[action];
 
@@ -962,30 +940,21 @@ function buildAppealButtonRow(serverConfig, action) {
 
   const appealButtonConfig = serverConfig?.officerManagement?.appealButton;
 
-  if (!appealButtonConfig?.enabled || !isConfiguredLinkUrl(appealButtonConfig.url)) {
+  if (!appealButtonConfig?.enabled) {
     return null;
   }
 
   try {
     return new ActionRowBuilder().addComponents(
       new ButtonBuilder()
+        .setCustomId(`officer_mgmt_appeal_start:${createStateKey()}`)
         .setLabel(appealButtonConfig.label || 'Appeal Decision')
-        .setStyle(ButtonStyle.Link)
-        .setURL(appealButtonConfig.url)
+        .setStyle(ButtonStyle.Primary)
     );
   } catch (error) {
     console.warn('Could not build officer management appeal button:', error);
     return null;
   }
-}
-
-function isConfiguredLinkUrl(url) {
-  return (
-    typeof url === 'string' &&
-    /^https?:\/\//i.test(url) &&
-    !url.startsWith('PUT_') &&
-    !url.startsWith('PASTE_')
-  );
 }
 
 function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent, appealButtonIncluded }) {

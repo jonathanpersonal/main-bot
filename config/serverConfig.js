@@ -28,8 +28,7 @@ module.exports = {
 
     appealButton: {
       enabled: true,
-      label: 'Appeal Decision',
-      url: 'PUT_APPEAL_FORM_OR_TICKET_URL_HERE'
+      label: 'Appeal Decision'
     },
 
     extraDepartmentRoleIds: [
