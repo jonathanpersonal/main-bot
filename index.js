@@ -49,6 +49,8 @@ async function startBot() {
     process.exit(1);
   }
 
+  validateServerConfig();
+
   await loadCommands(client);
   await client.login(process.env.DISCORD_TOKEN);
 }
