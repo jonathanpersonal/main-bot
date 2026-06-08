@@ -55,7 +55,6 @@ async function sendOfficerActionLog({
   staffUser,
   details,
   dmSent,
-  appealButtonIncluded,
   changedAt = new Date()
 }) {
   const embed = new EmbedBuilder()
@@ -68,7 +67,6 @@ async function sendOfficerActionLog({
       staffUser,
       details,
       dmSent,
-      appealButtonIncluded,
       changedAt
     }))
     .setTimestamp(changedAt);
@@ -118,7 +116,6 @@ function buildOfficerActionFields({
   staffUser,
   details,
   dmSent,
-  appealButtonIncluded,
   changedAt
 }) {
   const fields = [
@@ -209,14 +206,6 @@ function buildOfficerActionFields({
     });
   }
 
-  if (['termination', 'strike'].includes(actionType)) {
-    fields.push({
-      name: 'Appeal button included',
-      value: appealButtonIncluded ? 'Yes' : 'No',
-      inline: true
-    });
-  }
-
   return fields;
 }
 
@@ -224,13 +213,10 @@ function getDepartmentAndTimeFields(serverConfig, changedAt) {
   const unixTimestamp = Math.floor(changedAt.getTime() / 1000);
   const fields = [];
 
-  const departmentName = serverConfig?.officerManagement?.departmentName
-    || serverConfig?.departmentName;
-
-  if (departmentName) {
+  if (serverConfig?.departmentName) {
     fields.push({
       name: 'Department',
-      value: departmentName,
+      value: serverConfig.departmentName,
       inline: true
     });
   }
