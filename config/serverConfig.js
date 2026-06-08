@@ -24,8 +24,8 @@ module.exports = {
     },
     {
       name: 'Officer',
-      rankRoleId: 'PASTE_OFFICER_ROLE_ID_HERE',
-      permissionRoleId: 'PASTE_OFFICER_PERMISSION_ROLE_ID_HERE',
+      rankRoleId: '1177028193203531807',
+      permissionRoleId: '1177028209112522863',
       level: 2
     },
     {
