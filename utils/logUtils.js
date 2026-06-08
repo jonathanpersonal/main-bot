@@ -10,16 +10,86 @@ async function sendOfficerRankChangeLog({
   newRank,
   changedAt = new Date()
 }) {
+  const isPromotion = actionType === 'promote';
+  const actionLabel = isPromotion ? 'Promotion' : 'Demotion';
+
+  return sendStaffLogEmbed({
+    guild,
+    serverConfig,
+    embed: new EmbedBuilder()
+      .setTitle(`Officer ${actionLabel}`)
+      .setColor(isPromotion ? 0x2ecc71 : 0xe67e22)
+      .addFields([
+        {
+          name: 'Officer',
+          value: formatUserForLog(officerUser),
+          inline: true
+        },
+        {
+          name: 'Staff member',
+          value: formatUserForLog(staffUser),
+          inline: true
+        },
+        {
+          name: 'Old rank',
+          value: oldRank?.name || 'Unknown',
+          inline: true
+        },
+        {
+          name: 'New rank',
+          value: newRank?.name || 'Unknown',
+          inline: true
+        },
+        ...getDepartmentAndTimeFields(serverConfig, changedAt)
+      ])
+      .setTimestamp(changedAt),
+    warningLabel: 'officer rank change staff log'
+  });
+}
+
+async function sendOfficerActionLog({
+  guild,
+  serverConfig,
+  actionType,
+  officerUser,
+  staffUser,
+  details,
+  dmSent,
+  changedAt = new Date()
+}) {
+  const embed = new EmbedBuilder()
+    .setTitle(getOfficerActionTitle(actionType))
+    .setColor(getOfficerActionColor(actionType))
+    .addFields(buildOfficerActionFields({
+      serverConfig,
+      actionType,
+      officerUser,
+      staffUser,
+      details,
+      dmSent,
+      changedAt
+    }))
+    .setTimestamp(changedAt);
+
+  return sendStaffLogEmbed({
+    guild,
+    serverConfig,
+    embed,
+    warningLabel: 'officer management staff log'
+  });
+}
+
+async function sendStaffLogEmbed({ guild, serverConfig, embed, warningLabel }) {
   const staffLogChannelId = serverConfig?.logging?.staffLogChannelId;
 
   if (!staffLogChannelId || staffLogChannelId === 'PUT_STAFF_LOG_CHANNEL_ID_HERE') {
-    console.warn('Staff log channel is not configured. Skipping officer rank change log.');
-    return;
+    console.warn(`Staff log channel is not configured. Skipping ${warningLabel}.`);
+    return false;
   }
 
   if (!guild || !guild.channels) {
-    console.warn('Could not send officer rank change log because no guild was available.');
-    return;
+    console.warn(`Could not send ${warningLabel} because no guild was available.`);
+    return false;
   }
 
   try {
@@ -28,58 +98,165 @@ async function sendOfficerRankChangeLog({
 
     if (!channel || typeof channel.send !== 'function') {
       console.warn(`Configured staff log channel is missing or cannot receive messages: ${staffLogChannelId}`);
-      return;
+      return false;
     }
-
-    const isPromotion = actionType === 'promote';
-    const actionLabel = isPromotion ? 'Promotion' : 'Demotion';
-    const unixTimestamp = Math.floor(changedAt.getTime() / 1000);
-    const fields = [
-      {
-        name: 'Officer',
-        value: formatUserForLog(officerUser),
-        inline: true
-      },
-      {
-        name: 'Staff member',
-        value: formatUserForLog(staffUser),
-        inline: true
-      },
-      {
-        name: 'Old rank',
-        value: oldRank?.name || 'Unknown',
-        inline: true
-      },
-      {
-        name: 'New rank',
-        value: newRank?.name || 'Unknown',
-        inline: true
-      },
-      {
-        name: 'Date/time',
-        value: `<t:${unixTimestamp}:F>`,
-        inline: true
-      }
-    ];
-
-    if (serverConfig?.departmentName) {
-      fields.push({
-        name: 'Department',
-        value: serverConfig.departmentName,
-        inline: true
-      });
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle(`Officer ${actionLabel}`)
-      .setColor(isPromotion ? 0x2ecc71 : 0xe67e22)
-      .addFields(fields)
-      .setTimestamp(changedAt);
 
     await channel.send({ embeds: [embed] });
+    return true;
   } catch (error) {
-    console.warn('Could not send officer rank change staff log:', error);
+    console.warn(`Could not send ${warningLabel}:`, error);
+    return false;
   }
+}
+
+function buildOfficerActionFields({
+  serverConfig,
+  actionType,
+  officerUser,
+  staffUser,
+  details,
+  dmSent,
+  changedAt
+}) {
+  const fields = [
+    {
+      name: 'Officer',
+      value: formatUserForLog(officerUser),
+      inline: true
+    },
+    {
+      name: 'Staff member',
+      value: formatUserForLog(staffUser),
+      inline: true
+    }
+  ];
+
+  if (actionType === 'strike') {
+    fields.push({
+      name: 'Strike level',
+      value: String(details.strikeLevel || 'Unknown'),
+      inline: true
+    });
+  }
+
+  fields.push({
+    name: 'Reason',
+    value: safeFieldValue(details.reason),
+    inline: false
+  });
+
+  if (['termination', 'resignation', 'strike'].includes(actionType)) {
+    fields.push({
+      name: actionType === 'resignation' ? 'Evidence/documentation' : 'Evidence',
+      value: safeFieldValue(details.evidence),
+      inline: false
+    });
+  }
+
+  if (actionType === 'termination' || actionType === 'resignation') {
+    fields.push(
+      {
+        name: 'Additional comments',
+        value: safeFieldValue(details.comments),
+        inline: false
+      },
+      {
+        name: 'Blacklisted',
+        value: details.blacklisted ? 'Yes' : 'No',
+        inline: true
+      },
+      {
+        name: 'Can reapply',
+        value: details.canReapply ? 'Yes' : 'No',
+        inline: true
+      }
+    );
+  }
+
+  if (actionType === 'coaching') {
+    fields.push(
+      {
+        name: 'What was discussed',
+        value: safeFieldValue(details.discussion),
+        inline: false
+      },
+      {
+        name: 'Next steps/notes',
+        value: safeFieldValue(details.nextSteps),
+        inline: false
+      }
+    );
+  }
+
+  if (actionType === 'strike') {
+    fields.push({
+      name: 'Steps to prevent issue in the future',
+      value: safeFieldValue(details.nextSteps),
+      inline: false
+    });
+  }
+
+  fields.push(...getDepartmentAndTimeFields(serverConfig, changedAt));
+
+  if (typeof dmSent === 'boolean') {
+    fields.push({
+      name: 'DM sent',
+      value: dmSent ? 'Yes' : 'No',
+      inline: true
+    });
+  }
+
+  return fields;
+}
+
+function getDepartmentAndTimeFields(serverConfig, changedAt) {
+  const unixTimestamp = Math.floor(changedAt.getTime() / 1000);
+  const fields = [];
+
+  if (serverConfig?.departmentName) {
+    fields.push({
+      name: 'Department',
+      value: serverConfig.departmentName,
+      inline: true
+    });
+  }
+
+  fields.push({
+    name: 'Date/time',
+    value: `<t:${unixTimestamp}:F>`,
+    inline: true
+  });
+
+  return fields;
+}
+
+function getOfficerActionTitle(actionType) {
+  const titles = {
+    termination: 'Officer Terminated',
+    resignation: 'Officer Resigned',
+    coaching: 'Officer Coaching Logged',
+    strike: 'Officer Strike Issued'
+  };
+
+  return titles[actionType] || 'Officer Management Action';
+}
+
+function getOfficerActionColor(actionType) {
+  const colors = {
+    termination: 0xe74c3c,
+    resignation: 0x95a5a6,
+    coaching: 0x3498db,
+    strike: 0xf1c40f
+  };
+
+  return colors[actionType] || 0x5865f2;
+}
+
+function safeFieldValue(value) {
+  if (!value) return 'None provided.';
+
+  const stringValue = String(value);
+  return stringValue.length > 1024 ? `${stringValue.slice(0, 1021)}...` : stringValue;
 }
 
 function formatUserForLog(user) {
@@ -93,5 +270,6 @@ function formatUserForLog(user) {
 }
 
 module.exports = {
+  sendOfficerActionLog,
   sendOfficerRankChangeLog
 };
