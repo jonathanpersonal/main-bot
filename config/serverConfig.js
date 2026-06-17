@@ -75,6 +75,188 @@ Regards,
   },
 
 
+  trainingManagement: {
+    enabled: true,
+
+    allowedRoleIds: [],
+    ftoRoleIds: [],
+    ftoCommandRoleIds: [],
+
+    trainingGuideUrl: 'PUT_TRAINING_GUIDE_URL_HERE',
+
+    dmEnabled: true,
+
+    applicationReview: {
+      decisions: {
+        approved: {
+          label: 'Approve Application',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          dmMessage: `Dear {officerName},
+
+Thank you for applying to the RWPD. After careful review we have accepted your application. Please read the following information carefully as it contains information regarding your next steps:
+
+1. You will be/have been given cadet roles. You have 14 days to complete your training. Should you fail to complete your training you will be denied and must reapply.
+
+2. Trainings are posted in the Training Events channel in the Discord. Please make sure you RSVP to a training if you are able to attend.
+
+3. Once a training starts nobody else will be allowed in. If you are more than 5 minutes late the FTO may cancel the training.
+
+If you have any questions please feel free to contact a supervisor.
+
+Regards,
+{commandTeamName}`
+        },
+
+        denied: {
+          label: 'Deny Application',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          dmMessage: `Dear {officerName},
+
+Thank you for applying to the RWPD. After careful review, your application has been denied.
+
+Reason:
+{reason}
+
+Additional comments:
+{comments}
+
+You may reapply in 7 days.
+
+If you have any questions please feel free to contact a supervisor.
+
+Regards,
+{commandTeamName}`
+        },
+
+        pendingReview: {
+          label: 'Hold / Pending Review',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          pingFtoCommand: true,
+          dmMessage: `Dear {officerName},
+
+Your application for {departmentName} is currently pending further review.
+
+You will be notified once a final decision is made.
+
+Regards,
+{commandTeamName}`
+        }
+      }
+    },
+
+    cadetTraining: {
+      guideTitle: 'Cadet Training Directions/Information',
+
+      guideMessage: `Please read the directions below when completing a training.
+
+1. Open the training guide.
+2. Tell all cadets to join the training waiting room and arrive at the PD station.
+3. Move all cadets to the training room Discord voice channel.
+4. Go through the document step by step.
+5. Once completed, press Review Cadet to begin the scoring/review process.
+
+Frequently Asked Questions:
+
+1. If a cadet leaves mid-training, they must start over unless command approves otherwise.
+2. If you are unsure whether they should pass, choose Pending Further Review.
+3. If a cadet has an emergency and needs to leave, document where they stopped and mark the training incomplete.`,
+
+      outcomes: {
+        pass: {
+          label: 'Pass',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          dmMessage: `Dear {officerName},
+
+Congratulations on passing your {trainingName}.
+
+Your training has been marked as complete.
+
+{callsignLine}
+
+Please follow any next steps provided by command or the training team.
+
+Regards,
+{commandTeamName}`
+        },
+
+        fail: {
+          label: 'Fail',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          dmMessage: `Dear {officerName},
+
+Your {trainingName} has been marked as failed.
+
+Reason:
+{reason}
+
+What needs improvement:
+{improvementNotes}
+
+Please follow any next steps provided by the training team.
+
+Regards,
+{commandTeamName}`
+        },
+
+        incompleteEmergency: {
+          label: 'Incomplete - Emergency',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          dmMessage: `Dear {officerName},
+
+Your {trainingName} has been marked incomplete due to an emergency or approved interruption.
+
+You may be required to restart or continue training based on command/training team direction.
+
+Regards,
+{commandTeamName}`
+        },
+
+        incompleteDidNotFinish: {
+          label: 'Incomplete - Did Not Finish',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          dmMessage: `Dear {officerName},
+
+Your {trainingName} has been marked incomplete because it was not finished.
+
+You may be required to restart training before continuing in the department process.
+
+Regards,
+{commandTeamName}`
+        },
+
+        pendingReview: {
+          label: 'Pending Further Review',
+          addRoleIds: [],
+          removeRoleIds: [],
+          dmEnabled: true,
+          pingFtoCommand: true,
+          dmMessage: `Dear {officerName},
+
+Your {trainingName} has been submitted for further review.
+
+A member of the training command team will review the information and notify you once a final decision is made.
+
+Regards,
+{commandTeamName}`
+        }
+      }
+    }
+  },
+
   appeals: {
     enabled: true,
 

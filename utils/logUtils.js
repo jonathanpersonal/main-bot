@@ -352,8 +352,109 @@ function formatUserForLog(user) {
   return `${user} (${userTag})`;
 }
 
+async function sendApplicationReviewLog({
+  guild,
+  serverConfig,
+  officerUser,
+  staffUser,
+  outcomeLabel,
+  details,
+  roleResult,
+  dmStatus,
+  ftoCommandMentions,
+  changedAt = new Date()
+}) {
+  const fields = [
+    { name: 'Officer', value: formatUserForLog(officerUser), inline: true },
+    { name: 'Staff member', value: formatUserForLog(staffUser), inline: true },
+    { name: 'Decision', value: safeFieldValue(outcomeLabel), inline: true },
+    { name: 'Reason/notes/comments', value: safeFieldValue(formatDetails(details)), inline: false },
+    ...buildRoleResultFields(roleResult),
+    { name: 'DM sent', value: safeFieldValue(dmStatus), inline: true },
+    ...getDepartmentAndTimeFields(serverConfig, changedAt)
+  ];
+
+  const embed = new EmbedBuilder()
+    .setTitle('Application Review')
+    .setColor(0x3498db)
+    .addFields(fields)
+    .setTimestamp(changedAt);
+
+  if (ftoCommandMentions) {
+    embed.setDescription(ftoCommandMentions);
+  }
+
+  return sendStaffLogEmbed({
+    guild,
+    serverConfig,
+    embed,
+    warningLabel: 'application review staff log'
+  });
+}
+
+async function sendCadetTrainingLog({
+  guild,
+  serverConfig,
+  officerUser,
+  staffUser,
+  outcomeLabel,
+  details,
+  roleResult,
+  dmStatus,
+  ftoCommandMentions,
+  changedAt = new Date()
+}) {
+  const fields = [
+    { name: 'Officer', value: formatUserForLog(officerUser), inline: true },
+    { name: 'Staff member', value: formatUserForLog(staffUser), inline: true },
+    { name: 'Outcome', value: safeFieldValue(outcomeLabel), inline: true },
+    { name: 'Rating', value: safeFieldValue(details?.rating), inline: true },
+    { name: 'Performance comments', value: safeFieldValue(details?.performanceComments), inline: false },
+    { name: 'What went well', value: safeFieldValue(details?.whatWentWell), inline: false },
+    { name: 'What needs improvement', value: safeFieldValue(details?.improvementNotes), inline: false },
+    { name: 'Additional notes', value: safeFieldValue(details?.additionalNotes || details?.comments), inline: false },
+    ...buildRoleResultFields(roleResult),
+    { name: 'DM sent', value: safeFieldValue(dmStatus), inline: true },
+    ...getDepartmentAndTimeFields(serverConfig, changedAt)
+  ];
+
+  const embed = new EmbedBuilder()
+    .setTitle('Cadet Training Review')
+    .setColor(0x2ecc71)
+    .addFields(fields)
+    .setTimestamp(changedAt);
+
+  if (ftoCommandMentions) {
+    embed.setDescription(ftoCommandMentions);
+  }
+
+  return sendStaffLogEmbed({
+    guild,
+    serverConfig,
+    embed,
+    warningLabel: 'cadet training staff log'
+  });
+}
+
+function buildRoleResultFields(roleResult) {
+  return [
+    { name: 'Roles added', value: safeFieldValue(roleResult?.added?.join(', ') || 'None'), inline: false },
+    { name: 'Roles removed', value: safeFieldValue(roleResult?.removed?.join(', ') || 'None'), inline: false },
+    { name: 'Role failures/skips', value: safeFieldValue([...(roleResult?.failed || []), ...(roleResult?.skipped || [])].join('\n') || 'None'), inline: false }
+  ];
+}
+
+function formatDetails(details = {}) {
+  return Object.entries(details)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\n') || 'None provided.';
+}
+
 module.exports = {
+  sendApplicationReviewLog,
   sendAppealLog,
+  sendCadetTrainingLog,
   sendOfficerActionLog,
   sendOfficerRankChangeLog
 };
