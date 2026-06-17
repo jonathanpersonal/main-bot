@@ -38,7 +38,8 @@ const {
   parseCycleDate,
   formatHours,
   formatActivityStatus,
-  saveActivityCycle
+  saveActivityCycle,
+  resolveActivityFindingReview
 } = require('../utils/activityUtils');
 
 const DUTY_EMBED_COLOR = 0x2ecc71;
@@ -464,6 +465,17 @@ async function handleActivityReport(interaction) {
     });
 
     if (!dryRun) {
+      await notifyActivityStrikeUsers({
+        client: interaction.client,
+        guild: interaction.guild,
+        findings: report.findings,
+        cycleStart: cycleRange.cycleStart,
+        cycleEnd: cycleRange.cycleEnd,
+        activityConfig
+      });
+    }
+
+    if (!dryRun) {
       await withActivityTimeout(sendDutyLog({
         guild: interaction.guild,
         serverConfig,
@@ -518,12 +530,16 @@ async function handleActivityReport(interaction) {
         return null;
       });
       if (reviewChannel && typeof reviewChannel.send === 'function') {
-        const reviewLines = reviewFindings.slice(0, 20).map((finding) => `• <@${finding.userId}> — ${finding.rankName || 'Unknown Rank'} — ${formatHours(finding.totalSeconds)} — ${formatActivityStatus(finding.activityStatus)} — ${finding.commandReviewReason || 'Command review required'}`);
-        await withActivityTimeout(
-          reviewChannel.send(`Activity command review required for ${reviewFindings.length} officer(s):\n${reviewLines.join('\n')}`),
-          5000,
-          'Command review post took too long.'
-        ).catch((error) => console.warn('[activity-report] command review post skipped:', error.message || error));
+        for (const finding of reviewFindings.slice(0, 20)) {
+          await withActivityTimeout(
+            reviewChannel.send({
+              embeds: [buildActivityReviewEmbed(finding)],
+              components: [buildActivityReviewButtons(getFindingId(finding), getFindingInactiveStreak(finding), false)]
+            }),
+            5000,
+            'Command review post took too long.'
+          ).catch((error) => console.warn('[activity-report] command review post skipped:', error.message || error));
+        }
       }
     }
 
@@ -550,6 +566,191 @@ function withActivityTimeout(promise, timeoutMs, message) {
   });
 
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+}
+
+async function notifyActivityStrikeUsers({ client, guild, findings, cycleStart, cycleEnd, activityConfig }) {
+  const strikeFindings = findings.filter((finding) => finding.autoStrikeCreated && finding.autoStrikeLevel === 1);
+  if (strikeFindings.length === 0) return { sent: 0, failed: 0 };
+
+  let sent = 0;
+  let failed = 0;
+
+  for (const finding of strikeFindings) {
+    try {
+      const user = await withActivityTimeout(
+        client.users.fetch(finding.userId),
+        5000,
+        `Activity Strike 1 user fetch timed out for ${finding.userId}.`
+      );
+
+      await withActivityTimeout(
+        user.send({ embeds: [buildActivityStrikeDmEmbed({ guild, finding, cycleStart, cycleEnd, activityConfig })] }),
+        5000,
+        `Activity Strike 1 DM timed out for ${finding.userId}.`
+      );
+
+      sent += 1;
+      console.log(`[activity-report] Auto Activity Strike 1 DM sent to ${finding.userId}`);
+    } catch (error) {
+      failed += 1;
+      console.warn(`[activity-report] Auto Activity Strike 1 DM failed for ${finding.userId}:`, error.message || error);
+    }
+  }
+
+  console.log('[activity-report] Auto Activity Strike 1 DM notifications completed', { sent, failed });
+  return { sent, failed };
+}
+
+function buildActivityStrikeDmEmbed({ guild, finding, cycleStart, cycleEnd, activityConfig }) {
+  const discipline = activityConfig?.discipline || {};
+  const strikeLabel = discipline.strike1Label || 'Activity Strike 1 - Written Warning';
+  const activeRequirement = finding.activeRequiredHours ?? 'N/A';
+  const semiActiveRequirement = finding.semiActiveRequiredHours ?? 'N/A';
+
+  return new EmbedBuilder()
+    .setTitle(strikeLabel)
+    .setColor(ERROR_EMBED_COLOR)
+    .setDescription(`You have been issued **${strikeLabel}** for not meeting the activity requirement during the most recent activity cycle.`)
+    .addFields([
+      { name: 'Department', value: guild?.name || 'This server', inline: false },
+      { name: 'Cycle', value: `${formatDateOnly(cycleStart)} through ${formatDateOnly(cycleEnd)}`, inline: false },
+      { name: 'Recorded hours', value: `${formatHours(finding.totalSeconds)} total`, inline: true },
+      { name: 'Requirement', value: `Active: ${activeRequirement}h\nSemi-Active: ${semiActiveRequirement}h`, inline: true },
+      { name: 'Reference', value: finding.findingId || finding.autoStrikeReference || 'Activity finding', inline: false },
+      { name: 'Next step', value: 'Please contact Command Staff if you believe this was issued in error or if a timecard/LOA needs review.', inline: false }
+    ])
+    .setTimestamp(new Date());
+}
+
+async function handleActivityReviewButton(interaction) {
+  const [, , outcome, findingId] = interaction.customId.split(':');
+  if (!['manual', 'ignore'].includes(outcome) || !findingId) return false;
+
+  if (!memberCanUseActivity(interaction.member)) {
+    return interaction.reply({
+      embeds: [buildSimpleEmbed('Activity Review', 'You do not have permission to review activity findings.', ERROR_EMBED_COLOR)],
+      ephemeral: true
+    }).then(() => true);
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  await ensureDutyTables();
+
+  const finding = await resolveActivityFindingReview({
+    findingId,
+    outcome,
+    reviewedBy: interaction.user.id
+  });
+
+  if (!finding) {
+    await interaction.editReply({
+      embeds: [buildSimpleEmbed('Activity Review', 'That activity finding could not be found.', ERROR_EMBED_COLOR)]
+    });
+    return true;
+  }
+
+  const resolvedEmbed = buildActivityReviewEmbed(finding, { outcome, reviewedBy: interaction.user.id });
+  await interaction.message.edit({
+    embeds: [resolvedEmbed],
+    components: [buildActivityReviewButtons(findingId, getFindingInactiveStreak(finding), true)]
+  }).catch((error) => console.warn('[activity-report] could not update activity review message:', error.message || error));
+
+  await sendDutyLog({
+    guild: interaction.guild,
+    serverConfig,
+    title: outcome === 'ignore' ? 'Activity review ignored' : 'Activity review manually handled',
+    fields: [
+      { name: 'Finding ID', value: findingId, inline: true },
+      { name: 'Officer', value: `<@${getFindingUserId(finding)}>`, inline: true },
+      { name: 'Reviewed by', value: `<@${interaction.user.id}>`, inline: true },
+      { name: 'Outcome', value: outcome === 'ignore' ? 'Ignored / no action' : 'Manual action recorded', inline: false }
+    ]
+  }).catch((error) => console.warn('[activity-report] activity review log skipped:', error.message || error));
+
+  await interaction.editReply({
+    embeds: [buildSimpleEmbed(
+      'Activity Review Updated',
+      outcome === 'ignore'
+        ? `Marked ${findingId} as ignored/no action.`
+        : `Marked ${findingId} as manually handled. No Strike 2, removal, or other escalation was issued automatically by the bot.`,
+      DUTY_EMBED_COLOR
+    )]
+  });
+  return true;
+}
+
+function buildActivityReviewEmbed(finding, resolution = null) {
+  const userId = getFindingUserId(finding);
+  const findingId = getFindingId(finding);
+  const inactiveStreak = getFindingInactiveStreak(finding);
+  const rankName = finding.rankName || finding.rank_name || 'Unknown Rank';
+  const totalSeconds = finding.totalSeconds ?? finding.total_seconds ?? 0;
+  const activeRequired = finding.activeRequiredHours ?? finding.active_required_hours ?? 'N/A';
+  const semiRequired = finding.semiActiveRequiredHours ?? finding.semi_active_required_hours ?? 'N/A';
+  const reason = finding.commandReviewReason || finding.command_review_reason || 'Command review required.';
+  const isResolved = Boolean(resolution);
+
+  const embed = new EmbedBuilder()
+    .setTitle(isResolved ? 'Activity Review Resolved' : 'Activity Command Review Required')
+    .setColor(isResolved ? DUTY_EMBED_COLOR : 0xf1c40f)
+    .setDescription(isResolved
+      ? 'This activity finding has been marked reviewed by Command Staff.'
+      : 'Review this inactive activity finding and choose a manual handoff outcome. These buttons do not automatically issue Strike 2, final warnings, demotions, removals, or terminations.')
+    .addFields([
+      { name: 'Officer', value: `<@${userId}>`, inline: true },
+      { name: 'Rank', value: rankName, inline: true },
+      { name: 'Inactive streak', value: String(inactiveStreak || 0), inline: true },
+      { name: 'Hours', value: `${formatHours(totalSeconds)} total`, inline: true },
+      { name: 'Requirement', value: `Active: ${activeRequired}h\nSemi-Active: ${semiRequired}h`, inline: true },
+      { name: 'Finding ID', value: findingId || 'Unknown', inline: false },
+      { name: 'Reason', value: truncateField(reason), inline: false }
+    ])
+    .setTimestamp(new Date());
+
+  if (resolution) {
+    embed.addFields([
+      { name: 'Resolution', value: resolution.outcome === 'ignore' ? 'Ignored / no action' : 'Manual action recorded', inline: true },
+      { name: 'Reviewed by', value: `<@${resolution.reviewedBy}>`, inline: true }
+    ]);
+  }
+
+  return embed;
+}
+
+function buildActivityReviewButtons(findingId, inactiveStreak, disabled) {
+  const manualLabel = Number(inactiveStreak) >= 3 ? 'Mark Manual Removal Review' : 'Mark Manual Action';
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`duty_activity_review:manual:${findingId}`)
+      .setLabel(manualLabel)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId(`duty_activity_review:ignore:${findingId}`)
+      .setLabel('Ignore / No Action')
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(disabled)
+  );
+}
+
+function getFindingId(finding) {
+  return finding.findingId || finding.finding_id || finding.autoStrikeReference || finding.auto_strike_reference;
+}
+
+function getFindingUserId(finding) {
+  return finding.userId || finding.user_id;
+}
+
+function getFindingInactiveStreak(finding) {
+  return finding.inactiveStreak ?? finding.inactive_streak ?? 0;
+}
+
+function buildSimpleEmbed(title, description, color = DUTY_EMBED_COLOR) {
+  return new EmbedBuilder()
+    .setTitle(title)
+    .setColor(color)
+    .setDescription(description)
+    .setTimestamp(new Date());
 }
 
 async function handleActivityStatus(interaction) {
@@ -650,6 +851,7 @@ async function handleModalSubmit(interaction) {
 }
 
 async function handleButton(interaction) {
+  if (interaction.customId.startsWith('duty_activity_review:')) return handleActivityReviewButton(interaction);
   if (interaction.customId.startsWith('duty_correction_approve:') || interaction.customId.startsWith('duty_correction_deny:')) return handleCorrectionButton(interaction);
   if (!interaction.customId.startsWith('duty_loa_approve:') && !interaction.customId.startsWith('duty_loa_deny:')) return false;
   const [action, loaId] = interaction.customId.split(':');

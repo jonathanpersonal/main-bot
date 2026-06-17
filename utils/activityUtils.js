@@ -267,6 +267,43 @@ async function saveActivityFinding(findingData) {
   return findingId;
 }
 
+async function getActivityFindingById(findingId) {
+  const rows = await query(
+    `SELECT * FROM duty_activity_findings WHERE finding_id = ? LIMIT 1`,
+    [findingId]
+  );
+  return rows[0] || null;
+}
+
+async function resolveActivityFindingReview({ findingId, outcome, reviewedBy }) {
+  const finding = await getActivityFindingById(findingId);
+  if (!finding) return null;
+
+  const action = outcome === 'ignore'
+    ? 'COMMAND_REVIEW_IGNORED'
+    : 'MANUAL_COMMAND_ACTION_RECORDED';
+  const reason = outcome === 'ignore'
+    ? `Command review closed with no action by ${reviewedBy}.`
+    : `Command review marked as manually handled by ${reviewedBy}. No automatic escalation was issued by the bot.`;
+
+  await query(
+    `UPDATE duty_activity_findings
+     SET command_review_required = FALSE,
+         discipline_action = ?,
+         command_review_reason = ?,
+         notes = CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE '\n' END, ?)
+     WHERE finding_id = ?`,
+    [action, reason, reason, findingId]
+  );
+
+  return {
+    ...finding,
+    discipline_action: action,
+    command_review_required: false,
+    command_review_reason: reason
+  };
+}
+
 function applyDisciplinePolicy(finding, { config, dryRun }) {
   if (finding.activityStatus !== 'INACTIVE') return finding;
   const discipline = config?.duty?.activity?.discipline || {};
@@ -471,6 +508,8 @@ module.exports = {
   calculateInactiveStreak,
   saveActivityCycle,
   saveActivityFinding,
+  getActivityFindingById,
+  resolveActivityFindingReview,
   generateActivityReport,
   formatHours,
   formatActivityStatus,
