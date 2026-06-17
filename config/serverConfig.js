@@ -426,9 +426,9 @@ Internal Affairs Team`
     loa: {
       enabled: true,
 
-      approvalChannelId: '',
-      loaRoleId: '',
-      approverRoleIds: [],
+      approvalChannelId: '1516830234727415888',
+      loaRoleId: '1516830414302482562',
+      approverRoleIds: [1513618608134291458],
 
       minDays: 7,
       maxDaysWithoutCommandException: 60,
