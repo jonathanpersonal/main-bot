@@ -1,0 +1,120 @@
+/*************************************************************
+ * Department Database v2
+ * File: 12_PDV2_WebApp.gs
+ * -----------------------------------------------------------
+ * External API entry point for the Discord bot now and future UI
+ * backend routes later.
+ *************************************************************/
+
+function doGet(e) {
+  try {
+    var data = pdv2ParseRequest_(e);
+    if (!data.route && !data.action) {
+      return pdv2JsonOutput_(pdv2Success_({
+        status: 'ready',
+        version: PDV2.VERSION,
+        instanceMode: PDV2.INSTANCE_MODE,
+        serverName: pdv2GetConfigValue_('SERVER_NAME', PDV2.DEFAULTS.SERVER_NAME),
+        note: 'This is a single-server copied Google database instance. Use POST routes for bot actions.'
+      }));
+    }
+    return pdv2JsonOutput_(pdv2RouteRequest_(data, {}));
+  } catch (err) {
+    return pdv2JsonOutput_(pdv2Fail_(String(err), { stack: err && err.stack ? String(err.stack) : '' }));
+  }
+}
+
+function doPost(e) {
+  var runId = pdv2GenerateId_('POST');
+  try {
+    var data = pdv2ParseRequest_(e);
+    pdv2Log_('INFO', runId, 'POST_START', 'doPost received.', {
+      route: data.route || data.action || '',
+      keys: Object.keys(data || {}).sort()
+    });
+    var result = pdv2RouteRequest_(data, { runId: runId });
+    pdv2Log_(result.ok ? 'INFO' : 'WARN', runId, 'POST_END', 'doPost completed.', { ok: result.ok, route: data.route || data.action || '' });
+    return pdv2JsonOutput_(result);
+  } catch (err) {
+    pdv2Log_('ERROR', runId, 'POST_ERROR', String(err), { stack: err && err.stack ? String(err.stack) : '' });
+    return pdv2JsonOutput_(pdv2Fail_(String(err), { runId: runId }));
+  }
+}
+
+function pdv2RouteRequest_(data, options) {
+  data = data || {};
+  options = options || {};
+
+  var route = pdv2String_(pdv2Pick_(data, ['route', 'action'], 'ping'));
+  var normalizedRoute = route.toLowerCase();
+
+  if (normalizedRoute === 'ping') {
+    var secretCheck = null;
+    if (data.secret) secretCheck = pdv2RequireBotSecret_(data);
+    return pdv2Success_({
+      route: 'ping',
+      version: PDV2.VERSION,
+      instanceMode: PDV2.INSTANCE_MODE,
+      serverName: pdv2GetConfigValue_('SERVER_NAME', PDV2.DEFAULTS.SERVER_NAME),
+      secretConfigured: !!PropertiesService.getScriptProperties().getProperty(PDV2.SCRIPT_PROPERTY_BOT_SECRET),
+      authorized: secretCheck ? !!secretCheck.ok : undefined
+    });
+  }
+
+  if (!options.skipSecret) {
+    var auth = pdv2RequireBotSecret_(data);
+    if (!auth.ok) return auth;
+  }
+
+  var guildCheck = pdv2ValidateGuildIfConfigured_(data);
+  if (!guildCheck.ok) return guildCheck;
+
+  var botEnabled = pdv2Bool_(pdv2GetConfigValue_('BOT_API_ENABLED', 'TRUE'), true);
+  var uiEnabled = pdv2Bool_(pdv2GetConfigValue_('UI_BACKEND_ENABLED', 'TRUE'), true);
+
+  if (!botEnabled && normalizedRoute.indexOf('ui') !== 0) {
+    return pdv2Fail_('Bot API routes are disabled in SystemConfig.');
+  }
+
+  if (normalizedRoute === 'submitbotrequest') return pdv2SubmitBotRequest_(data);
+  if (normalizedRoute === 'getpendingbotactions') return pdv2GetPendingBotActions_(data);
+  if (normalizedRoute === 'markbotactioncomplete') return pdv2MarkBotActionComplete_(data);
+  if (normalizedRoute === 'markbotactionfailed') return pdv2MarkBotActionFailed_(data);
+  if (normalizedRoute === 'getrequeststatus') return pdv2GetRequestStatus_(pdv2Pick_(data, ['requestId'], ''));
+
+  if (normalizedRoute === 'upsertdatabaserecord') {
+    return pdv2UpsertDatabaseRecord_(data.record || data, {
+      source: pdv2Pick_(data, ['source'], 'API'),
+      actor: pdv2Pick_(data, ['actor', 'submittedByDiscordId'], '')
+    });
+  }
+  if (normalizedRoute === 'getdatabaserecord') return pdv2GetDatabaseRecordByDiscordId_(pdv2Pick_(data, ['discordId', 'targetDiscordId'], ''));
+  if (normalizedRoute === 'searchdatabase') return pdv2SearchDatabase_(pdv2Pick_(data, ['query', 'q'], ''), pdv2Pick_(data, ['limit', 'max'], 25));
+
+  if (normalizedRoute === 'listbotrequests') return pdv2ListSheetForUi_(PDV2.SHEETS.BOT_REQUESTS, pdv2Pick_(data, ['limit'], 100));
+  if (normalizedRoute === 'listbotactions') return pdv2ListSheetForUi_(PDV2.SHEETS.BOT_ACTIONS, pdv2Pick_(data, ['limit'], 100));
+  if (normalizedRoute === 'listauditlog') return pdv2ListSheetForUi_(PDV2.SHEETS.AUDIT_LOG, pdv2Pick_(data, ['limit'], 100));
+
+  if (normalizedRoute.indexOf('ui') === 0 && !uiEnabled) return pdv2Fail_('UI backend routes are disabled in SystemConfig.');
+  if (normalizedRoute === 'uigetbootstrapdata' || normalizedRoute === 'getuibootstrapdata') return pdv2GetUiBootstrapData_();
+  if (normalizedRoute === 'uigetdashboarddata' || normalizedRoute === 'getuidashboarddata') return pdv2GetUiDashboardData_();
+  if (normalizedRoute === 'uigetofficerprofile' || normalizedRoute === 'getofficerprofile') return pdv2GetOfficerProfileForUi_(pdv2Pick_(data, ['discordId', 'targetDiscordId'], ''));
+  if (normalizedRoute === 'uisearchofficers' || normalizedRoute === 'searchofficerrecords') return pdv2SearchDatabase_(pdv2Pick_(data, ['query', 'q'], ''), pdv2Pick_(data, ['limit'], 25));
+
+  return pdv2Fail_('Unknown route: ' + route, {
+    supportedRoutes: [
+      'ping',
+      'submitBotRequest',
+      'getPendingBotActions',
+      'markBotActionComplete',
+      'markBotActionFailed',
+      'getRequestStatus',
+      'upsertDatabaseRecord',
+      'getDatabaseRecord',
+      'searchDatabase',
+      'getUiBootstrapData',
+      'getUiDashboardData',
+      'getOfficerProfile'
+    ]
+  });
+}

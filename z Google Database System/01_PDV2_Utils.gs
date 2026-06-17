@@ -1,0 +1,170 @@
+/*************************************************************
+ * Department Database v2
+ * File: 01_PDV2_Utils.gs
+ *************************************************************/
+
+function pdv2Now_() {
+  return new Date();
+}
+
+function pdv2Timezone_() {
+  return pdv2GetConfigValue_('TIMEZONE', PDV2.DEFAULTS.TIMEZONE) || PDV2.DEFAULTS.TIMEZONE;
+}
+
+function pdv2FormatDate_(value, pattern) {
+  if (!value) return '';
+  var date = value instanceof Date ? value : new Date(value);
+  if (isNaN(date.getTime())) return String(value);
+  return Utilities.formatDate(date, pdv2Timezone_(), pattern || 'yyyy-MM-dd HH:mm:ss');
+}
+
+function pdv2GenerateId_(prefix) {
+  var stamp = Utilities.formatDate(new Date(), pdv2Timezone_(), 'yyyyMMdd-HHmmss');
+  var rand = Utilities.getUuid().replace(/-/g, '').slice(0, 8).toUpperCase();
+  return String(prefix || 'ID').toUpperCase() + '-' + stamp + '-' + rand;
+}
+
+function pdv2String_(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function pdv2Upper_(value) {
+  return pdv2String_(value).toUpperCase();
+}
+
+function pdv2Bool_(value, defaultValue) {
+  if (value === null || value === undefined || value === '') return !!defaultValue;
+  var s = String(value).trim().toLowerCase();
+  return s === 'true' || s === 'yes' || s === 'y' || s === '1';
+}
+
+function pdv2SafeJson_(value) {
+  try {
+    return JSON.stringify(value === undefined ? null : value);
+  } catch (err) {
+    return JSON.stringify({ error: 'JSON_STRINGIFY_FAILED', value: String(value) });
+  }
+}
+
+function pdv2JsonOutput_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function pdv2TextOutput_(text) {
+  return ContentService.createTextOutput(String(text === undefined || text === null ? '' : text))
+    .setMimeType(ContentService.MimeType.TEXT);
+}
+
+function pdv2Success_(data) {
+  var out = { ok: true };
+  Object.keys(data || {}).forEach(function(key) { out[key] = data[key]; });
+  return out;
+}
+
+function pdv2Fail_(message, data) {
+  var out = { ok: false, error: String(message || 'Unknown error') };
+  Object.keys(data || {}).forEach(function(key) { out[key] = data[key]; });
+  return out;
+}
+
+function pdv2Pick_(obj, keys, defaultValue) {
+  obj = obj || {};
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (obj[key] !== undefined && obj[key] !== null && String(obj[key]).trim() !== '') return obj[key];
+  }
+  return defaultValue === undefined ? '' : defaultValue;
+}
+
+function pdv2NormalizePayload_(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(function(item) { return pdv2NormalizePayload_(item); });
+  if (typeof value === 'object') {
+    var out = {};
+    Object.keys(value).forEach(function(key) {
+      out[key] = pdv2NormalizePayload_(value[key]);
+    });
+    return out;
+  }
+  return pdv2String_(value).replace(/^\{+|\}+$/g, '');
+}
+
+function pdv2ParseRequest_(e) {
+  var data = {};
+
+  if (e && e.parameter) {
+    Object.keys(e.parameter).forEach(function(key) {
+      data[key] = e.parameter[key];
+    });
+  }
+
+  if (e && e.postData && e.postData.contents) {
+    var raw = e.postData.contents;
+    var type = String(e.postData.type || '').toLowerCase();
+    if (type.indexOf('application/json') >= 0 || raw.trim().charAt(0) === '{') {
+      try {
+        var parsed = JSON.parse(raw);
+        Object.keys(parsed || {}).forEach(function(key) { data[key] = parsed[key]; });
+      } catch (err) {
+        data.__parseError = String(err);
+        data.__rawBody = raw;
+      }
+    } else {
+      data.__rawBody = raw;
+    }
+  }
+
+  return pdv2NormalizePayload_(data || {});
+}
+
+function pdv2SanitizeForStorage_(obj) {
+  var clone = {};
+  Object.keys(obj || {}).forEach(function(key) {
+    var lower = String(key).toLowerCase();
+    if (lower === 'secret' || lower === 'token' || lower === 'authorization' || lower === 'bot_api_secret') {
+      clone[key] = '[REDACTED]';
+    } else {
+      clone[key] = obj[key];
+    }
+  });
+  return clone;
+}
+
+function pdv2RequireBotSecret_(data) {
+  var expected = PropertiesService.getScriptProperties().getProperty(PDV2.SCRIPT_PROPERTY_BOT_SECRET) || '';
+  if (!expected) {
+    return { ok: true, warning: 'BOT_API_SECRET script property is not set. Set it before live use.' };
+  }
+
+  var provided = pdv2String_(pdv2Pick_(data || {}, ['secret', 'botSecret', 'apiSecret']));
+  if (provided && provided === expected) return { ok: true };
+  return { ok: false, error: 'Unauthorized. Missing or invalid secret.' };
+}
+
+function pdv2ValidateGuildIfConfigured_(data) {
+  var configuredGuildId = pdv2GetConfigValue_('DISCORD_GUILD_ID', '') || '';
+  if (!configuredGuildId) return { ok: true };
+
+  var incomingGuildId = pdv2String_(pdv2Pick_(data || {}, ['guildId', 'discordGuildId', 'serverId']));
+  if (!incomingGuildId) return { ok: true, warning: 'No guildId supplied; configured guild check skipped.' };
+  if (incomingGuildId === configuredGuildId) return { ok: true };
+
+  return {
+    ok: false,
+    error: 'This Google database is configured for a different Discord server.',
+    configuredGuildId: configuredGuildId,
+    incomingGuildId: incomingGuildId
+  };
+}
+
+function pdv2WithLock_(callback) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return callback();
+  } finally {
+    lock.releaseLock();
+  }
+}

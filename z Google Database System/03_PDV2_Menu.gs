@@ -1,0 +1,141 @@
+/*************************************************************
+ * Department Database v2
+ * File: 03_PDV2_Menu.gs
+ * -----------------------------------------------------------
+ * Purpose:
+ *   Required spreadsheet menus for install/setup/actions.
+ *************************************************************/
+
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+
+  ui.createMenu(PDV2.MENU.MAIN)
+    .addItem('Install / Repair System Sheets', 'pdv2MenuInstallRepair')
+    .addItem('Refresh Sheet Formatting', 'pdv2MenuRefreshFormatting')
+    .addSeparator()
+    .addItem('Set Server Name / Guild ID', 'pdv2MenuSetServerConfig')
+    .addItem('Add Me As Super Admin', 'pdv2MenuAddMeAsSuperAdmin')
+    .addSeparator()
+    .addItem('Seed Starter Departments + Ranks', 'pdv2MenuSeedStarterConfig')
+    .addItem('Seed Demo Callsign Slots', 'pdv2MenuSeedDemoCallsignSlots')
+    .addSeparator()
+    .addItem('Show Setup Checklist', 'pdv2MenuShowSetupChecklist')
+    .addToUi();
+
+  ui.createMenu(PDV2.MENU.BOT)
+    .addItem('Local API Ping Test', 'pdv2MenuApiPingTest')
+    .addItem('Create Local Bot Test Request', 'pdv2MenuCreateLocalBotTestRequest')
+    .addItem('View Pending Bot Action Count', 'pdv2MenuPendingBotActionCount')
+    .addSeparator()
+    .addItem('Clear TEST Bot Requests/Actions', 'pdv2MenuClearTestRows')
+    .addToUi();
+}
+
+function pdv2MenuInstallRepair() {
+  var result = pdv2InstallOrRepairSystem();
+  SpreadsheetApp.getUi().alert('Install / repair complete.\n\nSheets checked: ' + result.sheetsChecked.length);
+}
+
+function pdv2MenuRefreshFormatting() {
+  Object.keys(PDV2.SHEETS).forEach(function(key) {
+    pdv2FormatSheet_(pdv2EnsureSheet_(PDV2.SHEETS[key]));
+  });
+  SpreadsheetApp.getUi().alert('Sheet formatting refreshed.');
+}
+
+function pdv2MenuSetServerConfig() {
+  var ui = SpreadsheetApp.getUi();
+  var serverPrompt = ui.prompt('Server Name', 'Enter the display name for this Discord server/community database:', ui.ButtonSet.OK_CANCEL);
+  if (serverPrompt.getSelectedButton() !== ui.Button.OK) return;
+
+  var guildPrompt = ui.prompt('Discord Guild ID', 'Enter the Discord server/guild ID. You may leave this blank during early testing:', ui.ButtonSet.OK_CANCEL);
+  if (guildPrompt.getSelectedButton() !== ui.Button.OK) return;
+
+  pdv2SetConfigValue_('SERVER_NAME', serverPrompt.getResponseText(), 'Display name for this copied Google database instance.');
+  pdv2SetConfigValue_('DISCORD_GUILD_ID', guildPrompt.getResponseText(), 'Discord guild/server ID this database copy belongs to.');
+  pdv2Audit_('SHEET_MENU', 'SERVER_CONFIG_UPDATED', Session.getActiveUser().getEmail(), 'SystemConfig', 'SERVER_NAME', '', {
+    serverName: serverPrompt.getResponseText(),
+    guildIdSet: !!guildPrompt.getResponseText()
+  });
+
+  ui.alert('Server config saved.');
+}
+
+function pdv2MenuAddMeAsSuperAdmin() {
+  var email = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail() || '';
+  if (!email) {
+    SpreadsheetApp.getUi().alert('Apps Script could not detect your email. Add yourself manually to StaffAccess.');
+    return;
+  }
+  pdv2UpsertStaffAccess_({
+    email: email,
+    displayName: email,
+    accessLevel: 'SUPER_ADMIN',
+    active: true,
+    notes: 'Added from spreadsheet menu.'
+  });
+  SpreadsheetApp.getUi().alert('Added/updated StaffAccess for:\n' + email); 
+}
+
+function pdv2MenuSeedStarterConfig() {
+  var result = pdv2SeedStarterConfig_();
+  SpreadsheetApp.getUi().alert('Starter config seeded.\n\nDepartments added: ' + result.departmentsAdded + '\nRanks added: ' + result.ranksAdded);
+}
+
+function pdv2MenuSeedDemoCallsignSlots() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert(
+    'Seed Demo Callsign Slots',
+    'This adds starter callsign slots only if they do not already exist. You can edit/delete them after. Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) return;
+  var result = pdv2SeedDemoCallsignSlots_();
+  ui.alert('Demo callsign slot seed complete.\n\nSlots added: ' + result.added);
+}
+
+function pdv2MenuShowSetupChecklist() {
+  var msg = [
+    'Department Database v2 setup checklist:',
+    '',
+    '1. Run Install / Repair System Sheets.',
+    '2. Set Script Property BOT_API_SECRET in Apps Script project settings.',
+    '3. Use Set Server Name / Guild ID from this menu.',
+    '4. Review/edit Departments and Ranks sheets.',
+    '5. Deploy Apps Script as a Web App.',
+    '6. Give the Web App URL + secret to the bot environment variables.',
+    '',
+    'This spreadsheet/script is intended to be copied once per Discord server.'
+  ].join('\n');
+  SpreadsheetApp.getUi().alert(msg);
+}
+
+function pdv2MenuApiPingTest() {
+  var result = pdv2RouteRequest_({ route: 'ping', source: 'SHEET_MENU' }, { skipSecret: true });
+  SpreadsheetApp.getUi().alert('Ping result:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuCreateLocalBotTestRequest() {
+  var result = pdv2SubmitBotRequest_({
+    source: 'SHEET_MENU',
+    actionType: 'GOOGLE_TEST',
+    submittedByDiscordId: 'LOCAL_MENU_TEST',
+    targetDiscordId: 'LOCAL_MENU_TEST',
+    targetName: 'Local Menu Test',
+    payload: { message: 'Created from spreadsheet menu.' }
+  });
+  SpreadsheetApp.getUi().alert('Local test request created:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuPendingBotActionCount() {
+  var actions = pdv2GetPendingBotActions_({ max: 100 });
+  SpreadsheetApp.getUi().alert('Pending bot actions: ' + actions.actions.length);
+}
+
+function pdv2MenuClearTestRows() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert('Clear TEST Rows', 'This removes rows where Action Type includes GOOGLE_TEST or local test IDs. Continue?', ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) return;
+  var result = pdv2ClearTestRows_();
+  ui.alert('Test cleanup complete.\n\nRequests removed: ' + result.requestsRemoved + '\nActions removed: ' + result.actionsRemoved);
+}
