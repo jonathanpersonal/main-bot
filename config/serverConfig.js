@@ -78,11 +78,11 @@ Regards,
   trainingManagement: {
     enabled: true,
 
-    allowedRoleIds: [],
-    ftoRoleIds: [],
-    ftoCommandRoleIds: [],
+    allowedRoleIds: [1513618583530508298],
+    ftoRoleIds: [1513618583530508298],
+    ftoCommandRoleIds: [1513618608134291458],
 
-    trainingGuideUrl: 'PUT_TRAINING_GUIDE_URL_HERE',
+    trainingGuideUrl: 'https://docs.google.com/document/d/1bNE-LMcqw0qZE21swIC3sGGt6YXJoHmsYXVPSb6iJ3A/edit?tab=t.0#heading=h.jztjrvs5ofxu',
 
     dmEnabled: true,
 
@@ -90,7 +90,7 @@ Regards,
       decisions: {
         approved: {
           label: 'Approve Application',
-          addRoleIds: [],
+          addRoleIds: [1177028178749952141],
           removeRoleIds: [],
           dmEnabled: true,
           dmMessage: `Dear {officerName},
