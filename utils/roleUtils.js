@@ -316,9 +316,97 @@ async function addConfiguredRole(member, roleId, reason) {
   }
 }
 
+async function applyConfiguredRoleChanges(member, { addRoleIds = [], removeRoleIds = [], reason }) {
+  const result = {
+    added: [],
+    removed: [],
+    skipped: [],
+    failed: []
+  };
+
+  const botMember = member.guild.members.me || await member.guild.members.fetchMe();
+  const canManageRoles = botMember.permissions.has(PermissionFlagsBits.ManageRoles);
+
+  for (const roleId of getUniqueRoleIds(removeRoleIds)) {
+    const role = member.guild.roles.cache.get(roleId);
+
+    if (!role) {
+      result.skipped.push(`Missing remove role: ${roleId}`);
+      continue;
+    }
+
+    if (!member.roles.cache.has(roleId)) {
+      result.skipped.push(`Already missing: ${role.name}`);
+      continue;
+    }
+
+    const problem = getRoleManagementProblem({ botMember, role, canManageRoles, verb: 'remove' });
+    if (problem) {
+      result.failed.push(problem);
+      continue;
+    }
+
+    try {
+      await member.roles.remove(roleId, reason);
+      result.removed.push(role.name);
+    } catch (error) {
+      result.failed.push(`Could not remove "${role.name}": ${error.message}`);
+    }
+  }
+
+  for (const roleId of getUniqueRoleIds(addRoleIds)) {
+    const role = member.guild.roles.cache.get(roleId);
+
+    if (!role) {
+      result.skipped.push(`Missing add role: ${roleId}`);
+      continue;
+    }
+
+    if (member.roles.cache.has(roleId)) {
+      result.skipped.push(`Already has: ${role.name}`);
+      continue;
+    }
+
+    const problem = getRoleManagementProblem({ botMember, role, canManageRoles, verb: 'add' });
+    if (problem) {
+      result.failed.push(problem);
+      continue;
+    }
+
+    try {
+      await member.roles.add(roleId, reason);
+      result.added.push(role.name);
+    } catch (error) {
+      result.failed.push(`Could not add "${role.name}": ${error.message}`);
+    }
+  }
+
+  return result;
+}
+
+function getRoleManagementProblem({ botMember, role, canManageRoles, verb }) {
+  if (!canManageRoles) return 'The bot does not have the Manage Roles permission.';
+  if (role.managed) return `The role "${role.name}" is managed by an integration and cannot be changed by the bot.`;
+  if (botMember.roles.highest.comparePositionTo(role) <= 0) return `The bot role is not high enough to ${verb} the role "${role.name}".`;
+  return null;
+}
+
+function formatRoleChangeResult(result) {
+  if (!result) return 'Role changes: None';
+  return [
+    `Roles added: ${result.added.length ? result.added.join(', ') : 'None'}`,
+    `Roles removed: ${result.removed.length ? result.removed.join(', ') : 'None'}`,
+    `Roles skipped: ${result.skipped.length ? result.skipped.join('; ') : 'None'}`,
+    `Role failures: ${result.failed.length ? result.failed.join('; ') : 'None'}`
+  ].join('\n');
+}
+
+
 module.exports = {
   addConfiguredRole,
+  applyConfiguredRoleChanges,
   changeMemberRank,
+  formatRoleChangeResult,
   getConfiguredDepartmentRoleIds,
   removeConfiguredDepartmentRoles,
   validateBotCanManageRankChange,
