@@ -1,0 +1,4 @@
+# Google System v2 integration
+GOOGLE_SCRIPT_WEBAPP_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
+GOOGLE_SCRIPT_SECRET=replace-with-same-secret-as-BOT_API_SECRET-script-property
+GOOGLE_DEPARTMENT_KEY=main
