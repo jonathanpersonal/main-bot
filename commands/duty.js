@@ -31,6 +31,7 @@ const {
 } = require('../utils/dutyUtils');
 const { sendDutyLog } = require('../utils/logUtils');
 const { runLoaDailySync } = require('../utils/loaSync');
+const { buildAppealStartButtonRow } = require('../utils/appealUtils');
 const {
   generateActivityReport,
   calculateOfficerActivity,
@@ -465,13 +466,14 @@ async function handleActivityReport(interaction) {
     });
 
     if (!dryRun) {
-      await notifyActivityStrikeUsers({
+      await notifyActivityStatusUsers({
         client: interaction.client,
         guild: interaction.guild,
         findings: report.findings,
         cycleStart: cycleRange.cycleStart,
         cycleEnd: cycleRange.cycleEnd,
-        activityConfig
+        activityConfig,
+        reviewerUser: interaction.user
       });
     }
 
@@ -568,58 +570,155 @@ function withActivityTimeout(promise, timeoutMs, message) {
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
 }
 
-async function notifyActivityStrikeUsers({ client, guild, findings, cycleStart, cycleEnd, activityConfig }) {
-  const strikeFindings = findings.filter((finding) => finding.autoStrikeCreated && finding.autoStrikeLevel === 1);
-  if (strikeFindings.length === 0) return { sent: 0, failed: 0 };
+async function notifyActivityStatusUsers({ client, guild, findings, cycleStart, cycleEnd, activityConfig, reviewerUser }) {
+  const notifyFindings = findings.filter((finding) => {
+    if (finding.activityStatus === 'SEMI_ACTIVE') return true;
+    return finding.autoStrikeCreated && finding.autoStrikeLevel === 1;
+  });
+
+  if (notifyFindings.length === 0) return { sent: 0, failed: 0 };
 
   let sent = 0;
   let failed = 0;
 
-  for (const finding of strikeFindings) {
+  for (const finding of notifyFindings) {
+    const userId = getFindingUserId(finding);
     try {
       const user = await withActivityTimeout(
-        client.users.fetch(finding.userId),
+        client.users.fetch(userId),
         5000,
-        `Activity Strike 1 user fetch timed out for ${finding.userId}.`
+        `Activity notification user fetch timed out for ${userId}.`
       );
 
+      const messageOptions = buildActivityNotificationMessage({
+        user,
+        guild,
+        finding,
+        cycleStart,
+        cycleEnd,
+        activityConfig,
+        reviewerUser
+      });
+
       await withActivityTimeout(
-        user.send({ embeds: [buildActivityStrikeDmEmbed({ guild, finding, cycleStart, cycleEnd, activityConfig })] }),
+        user.send(messageOptions),
         5000,
-        `Activity Strike 1 DM timed out for ${finding.userId}.`
+        `Activity notification DM timed out for ${userId}.`
       );
 
       sent += 1;
-      console.log(`[activity-report] Auto Activity Strike 1 DM sent to ${finding.userId}`);
+      console.log(`[activity-report] Activity notification DM sent to ${userId}`);
     } catch (error) {
       failed += 1;
-      console.warn(`[activity-report] Auto Activity Strike 1 DM failed for ${finding.userId}:`, error.message || error);
+      console.warn(`[activity-report] Activity notification DM failed for ${userId}:`, error.message || error);
     }
   }
 
-  console.log('[activity-report] Auto Activity Strike 1 DM notifications completed', { sent, failed });
+  console.log('[activity-report] Activity notification DMs completed', { sent, failed });
   return { sent, failed };
 }
 
-function buildActivityStrikeDmEmbed({ guild, finding, cycleStart, cycleEnd, activityConfig }) {
-  const discipline = activityConfig?.discipline || {};
-  const strikeLabel = discipline.strike1Label || 'Activity Strike 1 - Written Warning';
-  const activeRequirement = finding.activeRequiredHours ?? 'N/A';
-  const semiActiveRequirement = finding.semiActiveRequiredHours ?? 'N/A';
-
-  return new EmbedBuilder()
-    .setTitle(strikeLabel)
-    .setColor(ERROR_EMBED_COLOR)
-    .setDescription(`You have been issued **${strikeLabel}** for not meeting the activity requirement during the most recent activity cycle.`)
+function buildActivityNotificationMessage({ user, guild, finding, cycleStart, cycleEnd, activityConfig, reviewerUser }) {
+  const isSemiActive = finding.activityStatus === 'SEMI_ACTIVE';
+  const inactiveStreak = getFindingInactiveStreak(finding);
+  const title = isSemiActive
+    ? 'Activity Requirement Reminder'
+    : inactiveStreak >= 3
+      ? 'Final Activity Warning'
+      : inactiveStreak === 2
+        ? 'Second Activity Warning'
+        : getActivityStrike1Label(activityConfig);
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setColor(isSemiActive ? 0xf1c40f : ERROR_EMBED_COLOR)
+    .setDescription(buildActivityNotificationBody({
+      user,
+      finding,
+      cycleStart,
+      cycleEnd,
+      activityConfig,
+      reviewerUser
+    }))
     .addFields([
-      { name: 'Department', value: guild?.name || 'This server', inline: false },
-      { name: 'Cycle', value: `${formatDateOnly(cycleStart)} through ${formatDateOnly(cycleEnd)}`, inline: false },
-      { name: 'Recorded hours', value: `${formatHours(finding.totalSeconds)} total`, inline: true },
-      { name: 'Requirement', value: `Active: ${activeRequirement}h\nSemi-Active: ${semiActiveRequirement}h`, inline: true },
-      { name: 'Reference', value: finding.findingId || finding.autoStrikeReference || 'Activity finding', inline: false },
-      { name: 'Next step', value: 'Please contact Command Staff if you believe this was issued in error or if a timecard/LOA needs review.', inline: false }
+      { name: 'Department', value: serverConfig?.departmentName || guild?.name || 'This department', inline: false },
+      { name: 'Cycle', value: `${formatDateOnly(cycleStart)} through ${formatDateOnly(cycleEnd)}`, inline: true },
+      { name: 'Recorded hours', value: `${formatHours(getFindingTotalSeconds(finding))} total`, inline: true },
+      { name: 'Reference', value: getFindingId(finding) || 'Activity finding', inline: false }
     ])
     .setTimestamp(new Date());
+
+  const messageOptions = { embeds: [embed] };
+  if (!isSemiActive && inactiveStreak === 1) {
+    const appealButtonRow = buildAppealStartButtonRow({
+      serverConfig,
+      appealType: 'strike',
+      officerId: user.id,
+      caseId: getFindingId(finding) || `activity-strike-${inactiveStreak}`
+    });
+    if (appealButtonRow) messageOptions.components = [appealButtonRow];
+  }
+
+  return messageOptions;
+}
+
+function buildActivityNotificationBody({ user, finding, cycleStart, cycleEnd, activityConfig, reviewerUser }) {
+  const hours = formatHours(getFindingTotalSeconds(finding));
+  const policyReference = activityConfig?.policyReference || 'RWPD Policy Memo 3 item 4.1';
+  const semiPolicyReference = activityConfig?.semiActivePolicyReference || 'RWPD Policy 3 - 2.6';
+  const commandSignature = activityConfig?.commandSignature || 'RWPD Command';
+  const commandStaffSignature = activityConfig?.commandStaffSignature || 'RWPD Command Staff';
+  const inactiveStreak = getFindingInactiveStreak(finding);
+  const reviewerMention = reviewerUser ? `<@${reviewerUser.id}>` : 'Command Staff';
+  const issuedAtUnix = Math.floor(Date.now() / 1000);
+  const dueUnix = Math.floor((Date.now() + 72 * 60 * 60 * 1000) / 1000);
+  const greeting = `Hello ${user},`;
+  const cycleText = `${formatDateOnly(cycleStart)} to ${formatDateOnly(cycleEnd)}`;
+
+  if (finding.activityStatus === 'SEMI_ACTIVE') {
+    return [
+      greeting,
+      '',
+      `The system has detected that you did not meet the activity requirements for the last cycle from ${cycleText}. According to our records you clocked in ${hours}. According to ${semiPolicyReference}, while you did not meet your active requirement, you did meet the semi-active requirement. As such, no inactivity warning will be issued. This message is a reminder to ensure that you are meeting your activity requirements. No actions are required of you at this time.`,
+      '',
+      'Regards,',
+      commandSignature
+    ].join('\n');
+  }
+
+  if (inactiveStreak >= 3) {
+    return [
+      greeting,
+      '',
+      `The system has detected that you did not meet the activity requirements for the last cycle from ${cycleText}. According to our records you clocked in ${hours}. Please note that you are currently in violation of ${policyReference}. As you were previously issued an activity strike, this will be considered your final activity warning. According to RWPD Policy 3 - 4.1, you are eligible to be removed for inactivity after receiving 3 warnings. You have 72 hours from <t:${issuedAtUnix}:f> to contact ${reviewerMention} regarding your activity, or you may face disciplinary action.`,
+      '',
+      'Regards,',
+      commandStaffSignature
+    ].join('\n');
+  }
+
+  if (inactiveStreak === 2) {
+    return [
+      greeting,
+      '',
+      `The system has detected that you did not meet the activity requirements for the last cycle from ${cycleText}. According to our records you clocked in ${hours}. Please note that you are currently in violation of ${policyReference}. As you were previously issued an activity strike, this will be considered your second warning. Please note that according to the RWPD Activity Policy, you are **required** to contact ${reviewerMention} within 72 hours or by <t:${dueUnix}:f>, or you may face additional disciplinary action.`,
+      '',
+      'Regards,',
+      commandStaffSignature
+    ].join('\n');
+  }
+
+  return [
+    greeting,
+    '',
+    `The system has detected that you did not meet the activity requirements for the last cycle from ${cycleText}. According to our records you clocked in ${hours}. Please note that you are currently in violation of ${policyReference}, and you have been issued an activity strike. If you believe that this is an error, you may use the appeal button provided below.`,
+    '',
+    'Regards,',
+    commandSignature
+  ].join('\n');
+}
+
+function getActivityStrike1Label(activityConfig) {
+  return activityConfig?.discipline?.strike1Label || 'Activity Strike 1 - Written Warning';
 }
 
 async function handleActivityReviewButton(interaction) {
@@ -655,6 +754,18 @@ async function handleActivityReviewButton(interaction) {
     components: [buildActivityReviewButtons(findingId, getFindingInactiveStreak(finding), true)]
   }).catch((error) => console.warn('[activity-report] could not update activity review message:', error.message || error));
 
+  let dmSent = false;
+  let dmAttempted = false;
+  if (outcome === 'manual' && getFindingInactiveStreak(finding) >= 2) {
+    dmAttempted = true;
+    dmSent = await sendManualActivityWarningDm({
+      client: interaction.client,
+      guild: interaction.guild,
+      finding,
+      reviewerUser: interaction.user
+    });
+  }
+
   await sendDutyLog({
     guild: interaction.guild,
     serverConfig,
@@ -663,7 +774,8 @@ async function handleActivityReviewButton(interaction) {
       { name: 'Finding ID', value: findingId, inline: true },
       { name: 'Officer', value: `<@${getFindingUserId(finding)}>`, inline: true },
       { name: 'Reviewed by', value: `<@${interaction.user.id}>`, inline: true },
-      { name: 'Outcome', value: outcome === 'ignore' ? 'Ignored / no action' : 'Manual action recorded', inline: false }
+      { name: 'Outcome', value: outcome === 'ignore' ? 'Ignored / no action' : 'Manual action recorded', inline: false },
+      { name: 'DM sent', value: dmAttempted ? (dmSent ? 'Yes' : 'No') : 'Not needed', inline: true }
     ]
   }).catch((error) => console.warn('[activity-report] activity review log skipped:', error.message || error));
 
@@ -672,11 +784,44 @@ async function handleActivityReviewButton(interaction) {
       'Activity Review Updated',
       outcome === 'ignore'
         ? `Marked ${findingId} as ignored/no action.`
-        : `Marked ${findingId} as manually handled. No Strike 2, removal, or other escalation was issued automatically by the bot.`,
+        : `Marked ${findingId} as manually handled.${dmAttempted ? ` DM sent: ${dmSent ? 'Yes' : 'No'}.` : ''} No removal or termination was issued automatically by the bot.`,
       DUTY_EMBED_COLOR
     )]
   });
   return true;
+}
+
+async function sendManualActivityWarningDm({ client, guild, finding, reviewerUser }) {
+  const userId = getFindingUserId(finding);
+  try {
+    const user = await withActivityTimeout(
+      client.users.fetch(userId),
+      5000,
+      `Manual activity warning user fetch timed out for ${userId}.`
+    );
+
+    const messageOptions = buildActivityNotificationMessage({
+      user,
+      guild,
+      finding,
+      cycleStart: finding.cycle_start,
+      cycleEnd: finding.cycle_end,
+      activityConfig: serverConfig?.duty?.activity || {},
+      reviewerUser
+    });
+
+    await withActivityTimeout(
+      user.send(messageOptions),
+      5000,
+      `Manual activity warning DM timed out for ${userId}.`
+    );
+
+    console.log(`[activity-report] Manual activity warning DM sent to ${userId}`);
+    return true;
+  } catch (error) {
+    console.warn(`[activity-report] Manual activity warning DM failed for ${userId}:`, error.message || error);
+    return false;
+  }
 }
 
 function buildActivityReviewEmbed(finding, resolution = null) {
@@ -718,7 +863,11 @@ function buildActivityReviewEmbed(finding, resolution = null) {
 }
 
 function buildActivityReviewButtons(findingId, inactiveStreak, disabled) {
-  const manualLabel = Number(inactiveStreak) >= 3 ? 'Mark Manual Removal Review' : 'Mark Manual Action';
+  const manualLabel = Number(inactiveStreak) >= 3
+    ? 'Proceed: Send Final Warning'
+    : Number(inactiveStreak) === 2
+      ? 'Proceed: Send Warning 2'
+      : 'Mark Manual Action';
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`duty_activity_review:manual:${findingId}`)
@@ -743,6 +892,10 @@ function getFindingUserId(finding) {
 
 function getFindingInactiveStreak(finding) {
   return finding.inactiveStreak ?? finding.inactive_streak ?? 0;
+}
+
+function getFindingTotalSeconds(finding) {
+  return finding.totalSeconds ?? finding.total_seconds ?? 0;
 }
 
 function buildSimpleEmbed(title, description, color = DUTY_EMBED_COLOR) {

@@ -269,7 +269,10 @@ async function saveActivityFinding(findingData) {
 
 async function getActivityFindingById(findingId) {
   const rows = await query(
-    `SELECT * FROM duty_activity_findings WHERE finding_id = ? LIMIT 1`,
+    `SELECT finding.*, cycle.cycle_start, cycle.cycle_end
+     FROM duty_activity_findings finding
+     LEFT JOIN duty_activity_cycles cycle ON cycle.cycle_id = finding.cycle_id
+     WHERE finding.finding_id = ? LIMIT 1`,
     [findingId]
   );
   return rows[0] || null;
