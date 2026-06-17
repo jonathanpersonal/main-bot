@@ -151,6 +151,27 @@ async function ensureDutyTables() {
   await ensureDutyTimecardCorrectionColumns();
 
   await query(`
+    CREATE TABLE IF NOT EXISTS duty_ridealong_feedback (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      feedback_id VARCHAR(64) NOT NULL UNIQUE,
+      guild_id VARCHAR(32) NOT NULL,
+      probationary_user_id VARCHAR(32) NOT NULL,
+      reviewer_user_id VARCHAR(32) NOT NULL,
+      reviewer_rank_key VARCHAR(128) NULL,
+      reviewer_rank_name VARCHAR(128) NULL,
+      ridealong_date DATE NULL,
+      rating TINYINT NOT NULL,
+      general_comments TEXT NOT NULL,
+      did_well TEXT NOT NULL,
+      improve_on TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_ridealong_probationary_created (guild_id, probationary_user_id, created_at),
+      INDEX idx_ridealong_reviewer_created (guild_id, reviewer_user_id, created_at),
+      INDEX idx_ridealong_feedback_id (feedback_id)
+    )
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS duty_activity_cycles (
       id INT AUTO_INCREMENT PRIMARY KEY,
       cycle_id VARCHAR(64) NOT NULL UNIQUE,

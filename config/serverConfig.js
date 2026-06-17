@@ -78,9 +78,9 @@ Regards,
   trainingManagement: {
     enabled: true,
 
-    allowedRoleIds: [1513618583530508298],
-    ftoRoleIds: [1513618583530508298],
-    ftoCommandRoleIds: [1513618608134291458],
+    allowedRoleIds: ['1513618583530508298'],
+    ftoRoleIds: ['1513618583530508298'],
+    ftoCommandRoleIds: ['1513618608134291458'],
 
     trainingGuideUrl: 'https://docs.google.com/document/d/1bNE-LMcqw0qZE21swIC3sGGt6YXJoHmsYXVPSb6iJ3A/edit?tab=t.0#heading=h.jztjrvs5ofxu',
 
@@ -90,7 +90,7 @@ Regards,
       decisions: {
         approved: {
           label: 'Approve Application',
-          addRoleIds: [1177028178749952141],
+          addRoleIds: ['1177028178749952141'],
           removeRoleIds: [],
           dmEnabled: true,
           dmMessage: `Dear {officerName},
@@ -422,6 +422,31 @@ Internal Affairs Team`
         countsAsAdmin: false
       }
     ],
+
+
+    rideAlongFeedback: {
+      enabled: true,
+
+      // Channel where ride-along feedback is posted for FTO/training review.
+      // Leave blank to fall back to logChannels.trainingLogs, then logging.staffLogChannelId.
+      feedbackChannelId: '',
+
+      // Minimum rank level allowed to submit feedback.
+      // Policy says Officer I or higher can conduct ride-alongs.
+      // Use the configured rank level system.
+      minReviewerRankLevel: 2,
+
+      // Optional extra role IDs allowed to submit feedback even if rank is not detected.
+      reviewerRoleIds: [],
+
+      // Optional role IDs that identify Probationary Officers.
+      // If this array is empty, do not block submission based on target role.
+      probationaryRoleIds: [],
+
+      requireTargetProbationary: false,
+
+      dmOfficerOnSubmit: false
+    },
 
     loa: {
       enabled: true,

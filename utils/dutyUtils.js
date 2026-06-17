@@ -216,6 +216,38 @@ function calculateDurationSeconds(clockInAt, clockOutAt) {
   return Math.floor((end.getTime() - start.getTime()) / 1000);
 }
 
+
+function createRideAlongFeedbackId() {
+  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `RAF-${datePart}-${randomPart}`;
+}
+
+async function createRideAlongFeedback({ guildId, probationaryUserId, reviewerUserId, reviewerRankKey, reviewerRankName, ridealongDate, rating, generalComments, didWell, improveOn }) {
+  let lastError;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const feedbackId = createRideAlongFeedbackId();
+    try {
+      await query(
+        `INSERT INTO duty_ridealong_feedback
+          (feedback_id, guild_id, probationary_user_id, reviewer_user_id, reviewer_rank_key, reviewer_rank_name, ridealong_date, rating, general_comments, did_well, improve_on)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [feedbackId, guildId, probationaryUserId, reviewerUserId, reviewerRankKey || null, reviewerRankName || null, ridealongDate || null, rating, generalComments, didWell, improveOn]
+      );
+      return getRideAlongFeedbackById(feedbackId);
+    } catch (error) {
+      lastError = error;
+      if (error.code !== 'ER_DUP_ENTRY') throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function getRideAlongFeedbackById(feedbackId) {
+  const rows = await query('SELECT * FROM duty_ridealong_feedback WHERE feedback_id = ? LIMIT 1', [feedbackId]);
+  return rows[0] || null;
+}
+
 function createLoaId() {
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -324,7 +356,10 @@ module.exports = {
   createTimecardId,
   createLoaId,
   createCorrectionId,
+  createRideAlongFeedbackId,
   createLoaRequest,
+  createRideAlongFeedback,
+  getRideAlongFeedbackById,
   getLoaRequestById,
   updateLoaApprovalMessage,
   approveLoaRequest,

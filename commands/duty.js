@@ -26,7 +26,8 @@ const {
   denyTimecardCorrection,
   applyApprovedTimecardCorrection,
   parseDateTimeInput,
-  calculateDurationSeconds
+  calculateDurationSeconds,
+  createRideAlongFeedback
 } = require('../utils/dutyUtils');
 const { sendDutyLog } = require('../utils/logUtils');
 const { runLoaDailySync } = require('../utils/loaSync');
@@ -73,6 +74,13 @@ module.exports = {
     .addSubcommand((subcommand) => subcommand
       .setName('loa')
       .setDescription('Submit a leave of absence request.'))
+    .addSubcommand((subcommand) => subcommand
+      .setName('ridealong')
+      .setDescription('Submit ride-along feedback for a Probationary Officer.')
+      .addUserOption((option) => option
+        .setName('officer')
+        .setDescription('Probationary Officer who completed the ride-along.')
+        .setRequired(true)))
     .addSubcommand((subcommand) => subcommand
       .setName('correction')
       .setDescription('Request a correction to one of your completed duty timecards.')
@@ -130,6 +138,7 @@ module.exports = {
       if (subcommand === 'status') return handleStatus(interaction);
       if (subcommand === 'recent') return handleRecent(interaction);
       if (subcommand === 'loa') return handleLoa(interaction);
+      if (subcommand === 'ridealong') return handleRideAlong(interaction);
       if (subcommand === 'correction') return handleCorrection(interaction);
       if (subcommand === 'loa-sync') return handleLoaSync(interaction);
       if (subcommand === 'activity-report') return handleActivityReport(interaction);
@@ -243,10 +252,14 @@ async function handleClockOut(interaction) {
 
   // TODO: Send completed timecards to the future Google duty webhook when googleWebhook.enabled is true.
 
+  const rideAlongReminder = serverConfig?.duty?.rideAlongFeedback?.enabled && ['fto', 'training'].includes(timecard.dutyType)
+    ? '\nIf you completed a ride-along with a Probationary Officer, submit the review with `/duty ridealong officer:@officer`.'
+    : '';
+
   return interaction.reply({
-    content: dmSent
+    content: `${dmSent
       ? 'You have been clocked out. I sent you a DM with your timecard summary.'
-      : 'You have been clocked out. I could not send your DM summary, but your timecard was saved.',
+      : 'You have been clocked out. I could not send your DM summary, but your timecard was saved.'}${rideAlongReminder}`,
     embeds: [summaryEmbed],
     ephemeral: true
   });
@@ -358,6 +371,30 @@ async function handleSelectMenu(interaction) {
 
   await interaction.showModal(buildCorrectionModal(timecard.timecard_id));
   return true;
+}
+
+async function handleRideAlong(interaction) {
+  const feedbackConfig = serverConfig?.duty?.rideAlongFeedback || {};
+  if (!feedbackConfig.enabled) return interaction.reply({ content: 'Ride-along feedback is not enabled for this server.', ephemeral: true });
+
+  const officer = interaction.options.getUser('officer', true);
+  if (officer.id === interaction.user.id) return interaction.reply({ content: 'You cannot submit ride-along feedback about yourself.', ephemeral: true });
+
+  const probationaryMember = await interaction.guild.members.fetch(officer.id).catch(() => null);
+  if (!probationaryMember) return interaction.reply({ content: 'That officer could not be found in this server.', ephemeral: true });
+
+  const reviewerRank = getRankSafely(interaction.member);
+  const minimumLevel = Number(feedbackConfig.minReviewerRankLevel || 2);
+  const rankAllowed = Number(reviewerRank?.level || 0) >= minimumLevel;
+  const roleAllowed = memberHasAnyRole(interaction.member, feedbackConfig.reviewerRoleIds || []);
+  if (!rankAllowed && !roleAllowed) return interaction.reply({ content: 'You do not have permission to submit ride-along feedback.', ephemeral: true });
+
+  const probationaryRoleIds = feedbackConfig.probationaryRoleIds || [];
+  if (feedbackConfig.requireTargetProbationary && probationaryRoleIds.length > 0 && !memberHasAnyRole(probationaryMember, probationaryRoleIds)) {
+    return interaction.reply({ content: 'That officer is not configured as a Probationary Officer for ride-along feedback.', ephemeral: true });
+  }
+
+  return interaction.showModal(buildRideAlongFeedbackModal(officer.id));
 }
 
 async function handleLoa(interaction) {
@@ -505,6 +542,7 @@ function getRequestedCycleRange(interaction, activityConfig) {
 }
 
 async function handleModalSubmit(interaction) {
+  if (interaction.customId.startsWith('duty_ridealong_feedback:')) return handleRideAlongFeedbackModalSubmit(interaction);
   if (interaction.customId.startsWith('duty_correction_modal:')) return handleCorrectionModalSubmit(interaction);
   if (interaction.customId !== 'duty_loa_request') return false;
   if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
@@ -585,6 +623,127 @@ async function handleButton(interaction) {
   return true;
 }
 
+
+
+function buildRideAlongFeedbackModal(probationaryUserId) {
+  return new ModalBuilder().setCustomId(`duty_ridealong_feedback:${probationaryUserId}`).setTitle('Ride-Along Feedback').addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ridealong_date').setLabel('Ride-along date, YYYY-MM-DD').setStyle(TextInputStyle.Short).setRequired(false)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('rating').setLabel('Rating, 1-10').setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('general_comments').setLabel('General comments').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('did_well').setLabel('What did they do well?').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('improve_on').setLabel('What could they improve on?').setStyle(TextInputStyle.Paragraph).setRequired(true))
+  );
+}
+
+async function handleRideAlongFeedbackModalSubmit(interaction) {
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  const feedbackConfig = serverConfig?.duty?.rideAlongFeedback || {};
+  if (!feedbackConfig.enabled) return interaction.reply({ content: 'Ride-along feedback is not enabled for this server.', ephemeral: true }).then(() => true);
+
+  const [, probationaryUserId] = interaction.customId.split(':');
+  if (!probationaryUserId || probationaryUserId === interaction.user.id) return interaction.reply({ content: 'You cannot submit ride-along feedback about yourself.', ephemeral: true }).then(() => true);
+
+  const reviewerRank = getRankSafely(interaction.member);
+  const minimumLevel = Number(feedbackConfig.minReviewerRankLevel || 2);
+  const rankAllowed = Number(reviewerRank?.level || 0) >= minimumLevel;
+  const roleAllowed = memberHasAnyRole(interaction.member, feedbackConfig.reviewerRoleIds || []);
+  if (!rankAllowed && !roleAllowed) return interaction.reply({ content: 'You do not have permission to submit ride-along feedback.', ephemeral: true }).then(() => true);
+
+  const probationaryMember = await interaction.guild.members.fetch(probationaryUserId).catch(() => null);
+  if (!probationaryMember) return interaction.reply({ content: 'That officer could not be found in this server.', ephemeral: true }).then(() => true);
+  const probationaryRoleIds = feedbackConfig.probationaryRoleIds || [];
+  if (feedbackConfig.requireTargetProbationary && probationaryRoleIds.length > 0 && !memberHasAnyRole(probationaryMember, probationaryRoleIds)) {
+    return interaction.reply({ content: 'That officer is not configured as a Probationary Officer for ride-along feedback.', ephemeral: true }).then(() => true);
+  }
+
+  const ridealongDateValue = interaction.fields.getTextInputValue('ridealong_date')?.trim() || '';
+  const ratingValue = interaction.fields.getTextInputValue('rating').trim();
+  const generalComments = interaction.fields.getTextInputValue('general_comments').trim();
+  const didWell = interaction.fields.getTextInputValue('did_well').trim();
+  const improveOn = interaction.fields.getTextInputValue('improve_on').trim();
+  const rating = Number(ratingValue);
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 10) return interaction.reply({ content: 'Rating must be a whole number from 1 to 10.', ephemeral: true }).then(() => true);
+  if (ridealongDateValue && !parseDateInput(ridealongDateValue)) return interaction.reply({ content: 'Ride-along date must be valid and use YYYY-MM-DD.', ephemeral: true }).then(() => true);
+  if (!generalComments || !didWell || !improveOn) return interaction.reply({ content: 'General comments, what they did well, and what they could improve on are required.', ephemeral: true }).then(() => true);
+
+  await ensureDutyTables();
+  const feedback = await createRideAlongFeedback({
+    guildId: interaction.guildId,
+    probationaryUserId,
+    reviewerUserId: interaction.user.id,
+    reviewerRankKey: reviewerRank?.rankRoleId || reviewerRank?.name || null,
+    reviewerRankName: reviewerRank?.name || null,
+    ridealongDate: ridealongDateValue || null,
+    rating,
+    generalComments,
+    didWell,
+    improveOn
+  });
+
+  const embed = buildRideAlongFeedbackEmbed(feedback);
+  await sendRideAlongFeedbackLog(interaction, embed);
+  await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Ride-along feedback submitted', fields: rideAlongFeedbackLogFields(feedback) });
+  // TODO: Send ride-along feedback to Google training/probation tracking webhook when that integration is added.
+
+  if (feedbackConfig.dmOfficerOnSubmit) {
+    const officerUser = await interaction.client.users.fetch(probationaryUserId).catch(() => null);
+    if (officerUser) await officerUser.send('Ride-along feedback has been submitted for you and will be reviewed by the training team.').catch(() => null);
+  }
+
+  await interaction.reply({ content: `Ride-along feedback submitted. Feedback ID: ${feedback.feedback_id}`, ephemeral: true });
+  return true;
+}
+
+function buildRideAlongFeedbackEmbed(feedback) {
+  return new EmbedBuilder()
+    .setTitle('Probationary Ride-Along Feedback')
+    .setColor(DUTY_EMBED_COLOR)
+    .addFields([
+      { name: 'Feedback ID', value: feedback.feedback_id, inline: true },
+      { name: 'Probationary Officer', value: `<@${feedback.probationary_user_id}>`, inline: true },
+      { name: 'Reviewing Officer', value: `<@${feedback.reviewer_user_id}>`, inline: true },
+      { name: 'Reviewer Rank', value: feedback.reviewer_rank_name || 'Not detected', inline: true },
+      { name: 'Ride-along Date', value: feedback.ridealong_date ? formatDateOnly(feedback.ridealong_date) : 'Not provided', inline: true },
+      { name: 'Rating', value: `${feedback.rating}/10`, inline: true },
+      { name: 'General Comments', value: truncateField(feedback.general_comments), inline: false },
+      { name: 'What They Did Well', value: truncateField(feedback.did_well), inline: false },
+      { name: 'What They Could Improve On', value: truncateField(feedback.improve_on), inline: false }
+    ])
+    .setTimestamp(new Date());
+}
+
+function rideAlongFeedbackLogFields(feedback) {
+  return [
+    { name: 'Feedback ID', value: feedback.feedback_id, inline: true },
+    { name: 'Probationary Officer', value: `<@${feedback.probationary_user_id}>`, inline: true },
+    { name: 'Reviewing Officer', value: `<@${feedback.reviewer_user_id}>`, inline: true },
+    { name: 'Reviewer Rank', value: feedback.reviewer_rank_name || 'Not detected', inline: true },
+    { name: 'Rating', value: `${feedback.rating}/10`, inline: true }
+  ];
+}
+
+async function sendRideAlongFeedbackLog(interaction, embed) {
+  const logChannelId = serverConfig?.duty?.rideAlongFeedback?.feedbackChannelId
+    || serverConfig?.logChannels?.trainingLogs
+    || serverConfig?.logging?.staffLogChannelId;
+
+  if (!logChannelId || logChannelId === 'PUT_STAFF_LOG_CHANNEL_ID_HERE') {
+    console.warn('Ride-along feedback channel is not configured. Skipping ride-along feedback log.');
+    return false;
+  }
+
+  try {
+    const channel = interaction.guild.channels.cache.get(logChannelId)
+      || await interaction.guild.channels.fetch(logChannelId);
+    if (!channel || typeof channel.send !== 'function') return false;
+    await channel.send({ embeds: [embed] });
+    return true;
+  } catch (error) {
+    console.warn('Could not send ride-along feedback log:', error);
+    return false;
+  }
+}
 
 async function handleCorrectionModalSubmit(interaction) {
   const [, timecardId] = interaction.customId.split(':');
