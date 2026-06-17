@@ -426,13 +426,23 @@ Internal Affairs Team`
     loa: {
       enabled: true,
 
+      // Channel where LOA approval requests are posted.
       approvalChannelId: '1516830234727415888',
-      loaRoleId: '1516830414302482562',
-      approverRoleIds: [1513618608134291458],
 
+      // Role the bot gives while an approved LOA is currently active.
+      loaRoleId: '1516830414302482562',
+
+      // Roles allowed to approve/deny LOA requests and run LOA sync.
+      // Discord IDs must always be strings.
+      approverRoleIds: [
+        '1513618608134291458'
+      ],
+
+      // LOA policy settings.
       minDays: 3,
       maxDaysWithoutCommandException: 60,
 
+      // Daily sync adds/removes the LOA role based on approved LOA dates.
       dailySync: {
         enabled: true,
         time: '09:00',
@@ -440,6 +450,7 @@ Internal Affairs Team`
         runOnStartup: true
       },
 
+      // Future officer-management/activity integration settings.
       exemptFromActivity: true,
       blocksPromotion: true,
       blocksDemotion: true,
