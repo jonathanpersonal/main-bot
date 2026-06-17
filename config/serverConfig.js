@@ -375,6 +375,7 @@ Internal Affairs Team`
   duty: {
     enabled: true,
 
+    // Leave blank to use logging.staffLogChannelId for completed duty timecards.
     logChannelId: '',
 
     dutyTypes: [

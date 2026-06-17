@@ -142,6 +142,15 @@ async function handleClockOut(interaction) {
     clockOutUnix,
     duration
   });
+  const logEmbed = buildTimecardEmbed({
+    title: 'Duty Clock-Out',
+    user: interaction.user,
+    timecard,
+    dutyTypeLabel: dutyType?.label || timecard.dutyType,
+    clockInUnix,
+    clockOutUnix,
+    duration
+  });
 
   let dmSent = true;
   try {
@@ -151,7 +160,7 @@ async function handleClockOut(interaction) {
     console.warn(`Could not DM duty timecard ${timecard.timecardId} to user ${interaction.user.id}:`, error);
   }
 
-  await sendDutyLog(interaction, summaryEmbed);
+  await sendDutyLog(interaction, logEmbed);
 
   // TODO: Send completed timecards to the future Google duty webhook when googleWebhook.enabled is true.
 
@@ -235,9 +244,13 @@ function buildTimecardEmbed({ title, user, timecard, dutyTypeLabel, clockInUnix,
 }
 
 async function sendDutyLog(interaction, embed) {
-  const logChannelId = serverConfig?.duty?.logChannelId;
+  const logChannelId = serverConfig?.duty?.logChannelId
+    || serverConfig?.logging?.staffLogChannelId;
 
-  if (!logChannelId) return false;
+  if (!logChannelId || logChannelId === 'PUT_STAFF_LOG_CHANNEL_ID_HERE') {
+    console.warn('Duty log channel is not configured. Skipping duty clock-out log.');
+    return false;
+  }
 
   try {
     const channel = interaction.guild.channels.cache.get(logChannelId)
