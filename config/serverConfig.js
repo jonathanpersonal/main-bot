@@ -372,6 +372,176 @@ Internal Affairs Team`
     }
   ],
 
+  duty: {
+    enabled: true,
+
+    logChannelId: '',
+
+    dutyTypes: [
+      {
+        key: 'patrol',
+        label: 'Patrol',
+        countsTowardActivity: true,
+        countsAsAdmin: false
+      },
+      {
+        key: 'training',
+        label: 'Training',
+        countsTowardActivity: true,
+        countsAsAdmin: true
+      },
+      {
+        key: 'fto',
+        label: 'FTO',
+        countsTowardActivity: true,
+        countsAsAdmin: true
+      },
+      {
+        key: 'quality_review',
+        label: 'Quality Review',
+        countsTowardActivity: true,
+        countsAsAdmin: true
+      },
+      {
+        key: 'administrative',
+        label: 'Administrative',
+        countsTowardActivity: true,
+        countsAsAdmin: true
+      },
+      {
+        key: 'meeting',
+        label: 'Meeting',
+        countsTowardActivity: true,
+        countsAsAdmin: false
+      },
+      {
+        key: 'other',
+        label: 'Other',
+        countsTowardActivity: true,
+        countsAsAdmin: false
+      }
+    ],
+
+    loa: {
+      enabled: false,
+      approvalChannelId: '',
+      loaRoleId: '',
+      minDays: 7,
+      maxDaysWithoutCommandException: 60,
+      exemptFromActivity: true,
+      blocksPromotion: true,
+      blocksDemotion: true,
+      blocksTermination: true
+    },
+
+    corrections: {
+      enabled: false,
+      approvalChannelId: ''
+    },
+
+    activity: {
+      enabled: false,
+      cycleLengthDays: 14,
+
+      semiActiveBlocksPromotion: true,
+      loaExemptsFromActivity: true,
+
+      discipline: {
+        autoStrike1Enabled: true,
+        strike1Label: 'Activity Strike 1 - Written Warning',
+
+        autoStrike2Enabled: false,
+        autoStrike3Enabled: false,
+        autoTerminationEnabled: false,
+
+        commandReviewAfterInactiveCycles: 2,
+        terminationReviewAfterInactiveCycles: 3
+      },
+
+      rankRequirements: [
+        {
+          group: 'Department Administration',
+          ranks: ['Chief', 'Deputy Chief', 'Commander'],
+          exempt: true
+        },
+        {
+          group: 'Command Staff',
+          rank: 'Captain',
+          activeHours: 10,
+          semiActiveHours: 4
+        },
+        {
+          group: 'Command Staff',
+          rank: 'Lieutenant',
+          activeHours: 10,
+          semiActiveHours: 4
+        },
+        {
+          group: 'Supervisor',
+          rank: 'Staff Sergeant',
+          activeHours: 8,
+          semiActiveHours: 3
+        },
+        {
+          group: 'Supervisor',
+          rank: 'Sergeant',
+          activeHours: 8,
+          semiActiveHours: 3
+        },
+        {
+          group: 'Training Staff',
+          rank: 'Corporal',
+          activeHours: 7.5,
+          semiActiveHours: 3,
+          requiresAdminHoursPercentage: 50
+        },
+        {
+          group: 'Officers',
+          rank: 'Lead Officer',
+          activeHours: 6,
+          semiActiveHours: 3,
+          requiresAdminHoursPercentage: 50
+        },
+        {
+          group: 'Officers',
+          rank: 'Senior Officer',
+          activeHours: 3.5,
+          semiActiveHours: 2
+        },
+        {
+          group: 'Officers',
+          rank: 'Officer II',
+          activeHours: 3.5,
+          semiActiveHours: 2
+        },
+        {
+          group: 'Officers',
+          rank: 'Probationary Officer',
+          activeHours: 2.5,
+          semiActiveHours: 2
+        },
+        {
+          group: 'Officers',
+          rank: 'Officer',
+          activeHours: 2.5,
+          semiActiveHours: 2
+        },
+        {
+          group: 'Recruits',
+          ranks: ['Recruit', 'Cadet'],
+          trainingRequiredWithinDays: 14
+        }
+      ]
+    },
+
+    // TODO: Future phases should implement LOA requests, timecard corrections,
+    // activity cycle reports/findings, and Command Staff review workflows.
+    googleWebhook: {
+      enabled: false,
+      urlEnvName: 'GOOGLE_DUTY_WEBHOOK_URL'
+    }
+  },
+
   google: {
     webhookUrl: process.env.GOOGLE_WEBHOOK_URL || null
   }
