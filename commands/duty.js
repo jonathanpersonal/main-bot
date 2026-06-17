@@ -722,7 +722,7 @@ function getActivityStrike1Label(activityConfig) {
 }
 
 async function handleActivityReviewButton(interaction) {
-  const [, , outcome, findingId] = interaction.customId.split(':');
+  const [, outcome, findingId] = interaction.customId.split(':');
   if (!['manual', 'ignore'].includes(outcome) || !findingId) return false;
 
   if (!memberCanUseActivity(interaction.member)) {

@@ -42,6 +42,13 @@ const APPEAL_TYPES = {
   }
 };
 
+const ACTIVITY_STRIKE_APPEAL_FIELDS = [
+  ['overturnReason', 'Why should your activity strike be overturned?', true],
+  ['hoursAccuracy', 'Do you believe the hours are accurate?', true],
+  ['evidence', 'Evidence', false],
+  ['additionalInfo', 'Any other info?', false]
+];
+
 async function handleAppealInteraction(interaction, client) {
   if (!interaction.isButton() && !interaction.isModalSubmit()) return false;
 
@@ -69,6 +76,20 @@ function buildAppealStartButtonRow({ serverConfig, appealType, officerId, caseId
       .setLabel(officerButtonConfig?.label || 'Appeal Decision')
       .setStyle(ButtonStyle.Primary)
   );
+}
+
+function getAppealTypeConfig(appealType, caseId) {
+  const typeConfig = APPEAL_TYPES[appealType];
+  if (!typeConfig) return null;
+  if (appealType === 'strike' && isActivityStrikeCaseId(caseId)) {
+    return {
+      ...typeConfig,
+      label: 'Activity Strike',
+      modalTitle: 'Activity Strike Appeal',
+      fields: ACTIVITY_STRIKE_APPEAL_FIELDS
+    };
+  }
+  return typeConfig;
 }
 
 async function handleAppealButton(interaction, client) {
@@ -225,7 +246,7 @@ async function showAppealModal({ interaction, serverConfig, appealType, officerI
     return true;
   }
 
-  const typeConfig = APPEAL_TYPES[appealType];
+  const typeConfig = getAppealTypeConfig(appealType, caseId);
   if (!typeConfig) {
     await interaction.reply({ content: 'This appeal type is not available.', ephemeral: true });
     return true;
@@ -254,7 +275,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
     return true;
   }
 
-  const typeConfig = APPEAL_TYPES[appealType];
+  const typeConfig = getAppealTypeConfig(appealType, caseId);
   if (!typeConfig) {
     await interaction.reply({ content: 'This appeal type is not available.', ephemeral: true });
     return true;
@@ -562,11 +583,14 @@ async function showDecisionModal({ interaction, serverConfig, appealType, office
       new ActionRowBuilder().addComponents(createTextInput('nextSteps', 'Next steps/actions', false))
     );
   } else {
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(createTextInput('reason', 'Reason for denial', true)),
-      new ActionRowBuilder().addComponents(createTextInput('canReapply', 'Can they reapply? Yes/No or details', false)),
-      new ActionRowBuilder().addComponents(createTextInput('comments', 'Comments', false))
-    );
+    const rows = [
+      new ActionRowBuilder().addComponents(createTextInput('reason', 'Reason for denial', true))
+    ];
+    if (appealType !== 'strike') {
+      rows.push(new ActionRowBuilder().addComponents(createTextInput('canReapply', 'Can they reapply? Yes/No or details', false)));
+    }
+    rows.push(new ActionRowBuilder().addComponents(createTextInput('comments', 'Comments', false)));
+    modal.addComponents(...rows);
   }
 
   await interaction.showModal(modal);
@@ -586,7 +610,9 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     : '';
   const canReapply = isApproval
     ? ''
-    : interaction.fields.getTextInputValue('canReapply') || 'No';
+    : appealType === 'strike'
+      ? ''
+      : interaction.fields.getTextInputValue('canReapply') || 'No';
 
   const officerUser = await interaction.client.users.fetch(officerId).catch(() => null);
   const dmSent = await sendDecisionDm({
@@ -628,6 +654,7 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     comments,
     nextSteps,
     canReapply,
+    appealType,
     strikeRemovalResult
   }));
 
@@ -635,7 +662,7 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     `Reason: ${reason}`,
     comments && comments !== 'None provided.' ? `Comments: ${comments}` : null,
     isApproval && nextSteps && nextSteps !== 'None provided.' ? `Next steps: ${nextSteps}` : null,
-    !isApproval ? `Can reapply: ${canReapply}` : null,
+    !isApproval && appealType !== 'strike' ? `Can reapply: ${canReapply}` : null,
     strikeRemovalResult ? `Strike role action: ${strikeRemovalResult.message}` : null
   ].filter(Boolean).join('\n');
 
@@ -660,7 +687,7 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
   return true;
 }
 
-function buildFinalDecisionSummary({ decision, staffUser, reason, comments, nextSteps, canReapply, strikeRemovalResult }) {
+function buildFinalDecisionSummary({ decision, staffUser, reason, comments, nextSteps, canReapply, appealType, strikeRemovalResult }) {
   const isApproval = decision === 'approved';
   return [
     `Appeal ${decision} by ${staffUser}.`,
@@ -668,7 +695,7 @@ function buildFinalDecisionSummary({ decision, staffUser, reason, comments, next
     `**Reason:**\n${reason}`,
     '',
     `**Comments/notes:**\n${comments}`,
-    ...(isApproval ? ['', `**Next steps/actions:**\n${nextSteps}`] : ['', `**Can reapply:**\n${canReapply}`]),
+    ...(isApproval ? ['', `**Next steps/actions:**\n${nextSteps}`] : appealType === 'strike' ? [] : ['', `**Can reapply:**\n${canReapply}`]),
     ...(strikeRemovalResult ? ['', `**Strike role action:**\n${strikeRemovalResult.message}`] : []),
     '',
     '_This is the final appeal decision. This thread will be marked closed, locked, and archived._'
@@ -1067,6 +1094,10 @@ async function safeThreadSend(thread, content) {
 function getStrikeLevelFromCaseId(caseId) {
   const match = String(caseId || '').match(/^st([123])-/i);
   return match ? Number(match[1]) : null;
+}
+
+function isActivityStrikeCaseId(caseId) {
+  return /^(AF-|activity-strike)/i.test(String(caseId || ''));
 }
 
 function generateAppealId() {
