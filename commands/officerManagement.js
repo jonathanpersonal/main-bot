@@ -312,7 +312,9 @@ module.exports = {
     }
 
     return false;
-  }
+  },
+
+  issueOfficerStrike
 };
 
 async function handlePromotionOrDemotion({
@@ -711,31 +713,39 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
   }
 
   if (state.action === 'strike') {
-    const dmResult = await trySendOfficerDm({
-      officerUser,
+    const strikeResult = await issueOfficerStrike({
+      guild: interaction.guild,
+      client: interaction.client,
       serverConfig,
-      action: state.action,
+      officerUserId: state.officerUserId,
+      staffUser: interaction.user,
+      strikeLevel: state.strikeLevel,
       details: state.details,
-      strikeLevel: state.strikeLevel
+      category: 'general',
+      sendDm: true,
+      changedAt
     });
-    dmSent = dmResult.sent;
-    appealButtonIncluded = dmResult.appealButtonIncluded;
+    roleResult = strikeResult.roleResult;
+    dmSent = strikeResult.dmSent;
+    appealButtonIncluded = strikeResult.appealButtonIncluded;
   }
 
-  await sendOfficerActionLog({
-    guild: interaction.guild,
-    serverConfig,
-    actionType: state.action,
-    officerUser,
-    staffUser: interaction.user,
-    details: {
-      ...state.details,
-      strikeLevel: state.strikeLevel
-    },
-    dmSent: state.action === 'coaching' ? undefined : dmSent,
-    appealButtonIncluded,
-    changedAt
-  });
+  if (state.action !== 'strike') {
+    await sendOfficerActionLog({
+      guild: interaction.guild,
+      serverConfig,
+      actionType: state.action,
+      officerUser,
+      staffUser: interaction.user,
+      details: {
+        ...state.details,
+        strikeLevel: state.strikeLevel
+      },
+      dmSent: state.action === 'coaching' ? undefined : dmSent,
+      appealButtonIncluded,
+      changedAt
+    });
+  }
 
   // TODO: Later send this officer management action to Google webhook.
 
@@ -849,7 +859,7 @@ async function confirmRankChange({
   });
 }
 
-async function trySendOfficerDm({ officerUser, serverConfig, action, details, strikeLevel }) {
+async function trySendOfficerDm({ officerUser, serverConfig, action, details, strikeLevel, caseId = null }) {
   const template = serverConfig?.officerManagement?.dmMessages?.[action];
 
   if (!template) {
@@ -863,7 +873,7 @@ async function trySendOfficerDm({ officerUser, serverConfig, action, details, st
     serverConfig,
     action,
     officerId: officerUser.id,
-    caseId: createCaseId(action, strikeLevel)
+    caseId: caseId || createCaseId(action, strikeLevel)
   });
   const messageOptions = {
     content: formatDmMessage(template, buildDmPlaceholderValues({
@@ -891,6 +901,113 @@ async function trySendOfficerDm({ officerUser, serverConfig, action, details, st
       appealButtonIncluded: false
     };
   }
+}
+
+async function issueOfficerStrike({
+  guild,
+  client,
+  serverConfig,
+  officerUserId,
+  staffUser,
+  strikeLevel,
+  details,
+  category = 'general',
+  sendDm = true,
+  caseId = null,
+  changedAt = new Date()
+}) {
+  const officerUser = await client.users.fetch(officerUserId);
+  const officerMember = await guild.members.fetch(officerUserId).catch(() => null);
+  const roleResult = officerMember
+    ? await issueStrikeRole({
+      member: officerMember,
+      serverConfig,
+      strikeLevel,
+      category,
+      reason: `Strike ${strikeLevel} (${category}) issued by ${staffUser?.tag || staffUser?.id || 'system'}. Reason: ${details?.reason || 'No reason provided.'}`
+    })
+    : {
+      mode: getStrikeRoleMode(serverConfig, category),
+      roleId: null,
+      roleName: null,
+      added: false,
+      skipped: false,
+      error: 'Officer member could not be fetched.'
+    };
+
+  let dmSent = false;
+  let appealButtonIncluded = false;
+  if (sendDm) {
+    const dmResult = await trySendOfficerDm({
+      officerUser,
+      serverConfig,
+      action: 'strike',
+      details,
+      strikeLevel,
+      caseId
+    });
+    dmSent = dmResult.sent;
+    appealButtonIncluded = dmResult.appealButtonIncluded;
+  }
+
+  await sendOfficerActionLog({
+    guild,
+    serverConfig,
+    actionType: 'strike',
+    officerUser,
+    staffUser,
+    details: {
+      ...details,
+      strikeLevel,
+      strikeCategory: category,
+      strikeRoleMode: roleResult.mode || 'none',
+      strikeRole: roleResult.roleName || roleResult.roleId || 'None',
+      strikeRoleAdded: roleResult.added ? 'Yes' : roleResult.skipped ? 'Skipped' : 'No',
+      strikeRoleError: roleResult.error || 'None'
+    },
+    dmSent: sendDm ? dmSent : undefined,
+    appealButtonIncluded,
+    changedAt
+  });
+
+  return {
+    officerUser,
+    roleResult,
+    dmSent,
+    appealButtonIncluded
+  };
+}
+
+async function issueStrikeRole({ member, serverConfig, strikeLevel, category, reason }) {
+  const mode = getStrikeRoleMode(serverConfig, category);
+  const roleId = getStrikeRoleId(serverConfig, strikeLevel, category);
+
+  if (mode === 'none') {
+    return { mode, roleId: null, roleName: null, added: false, skipped: true, error: null };
+  }
+
+  const result = await addConfiguredRole(member, roleId, reason);
+  return {
+    mode,
+    roleId,
+    roleName: result.roleName,
+    added: result.added,
+    skipped: result.skipped,
+    error: result.error
+  };
+}
+
+function getStrikeRoleMode(serverConfig, category) {
+  if (category !== 'activity') return 'regular';
+  const mode = serverConfig?.duty?.activity?.discipline?.strikeRoleMode || 'none';
+  return ['regular', 'separate', 'none'].includes(mode) ? mode : 'none';
+}
+
+function getStrikeRoleId(serverConfig, strikeLevel, category) {
+  const mode = getStrikeRoleMode(serverConfig, category);
+  if (mode === 'none') return null;
+  if (mode === 'separate') return serverConfig?.duty?.activity?.discipline?.activityStrikeRoleIds?.[strikeLevel] || null;
+  return serverConfig?.appeals?.strikeRoleIds?.[strikeLevel] || null;
 }
 
 function formatDmMessage(template, values) {
@@ -989,6 +1106,9 @@ function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResul
   if (state.action === 'strike') {
     lines.push(
       `Strike Level: ${state.strikeLevel}`,
+      `Strike Role: ${roleResult?.roleName || roleResult?.roleId || 'None'}`,
+      `Strike Role Added: ${roleResult?.added ? 'Yes' : roleResult?.skipped ? 'Skipped' : 'No'}`,
+      ...(roleResult?.error ? [`Strike Role Error: ${roleResult.error}`] : []),
       `DM sent: ${dmSent ? 'Yes' : 'No'}`,
       `Appeal button included: ${appealButtonIncluded ? 'Yes' : 'No'}`
     );

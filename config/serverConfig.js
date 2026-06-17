@@ -511,6 +511,17 @@ Internal Affairs Team`
         autoStrike1Enabled: true,
         strike1Label: 'Activity Strike 1 - Written Warning',
 
+        // Role behavior for activity strikes:
+        // - 'none': do not issue strike roles
+        // - 'regular': use appeals.strikeRoleIds
+        // - 'separate': use activityStrikeRoleIds below
+        strikeRoleMode: 'none',
+        activityStrikeRoleIds: {
+          1: 'PUT_ACTIVITY_STRIKE_1_ROLE_ID_HERE',
+          2: 'PUT_ACTIVITY_STRIKE_2_ROLE_ID_HERE',
+          3: 'PUT_ACTIVITY_STRIKE_3_ROLE_ID_HERE'
+        },
+
         autoStrike2Enabled: false,
         autoStrike3Enabled: false,
         autoTerminationEnabled: false,

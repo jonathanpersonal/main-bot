@@ -32,6 +32,7 @@ const {
 const { sendDutyLog } = require('../utils/logUtils');
 const { runLoaDailySync } = require('../utils/loaSync');
 const { buildAppealStartButtonRow } = require('../utils/appealUtils');
+const { issueOfficerStrike } = require('./officerManagement');
 const {
   generateActivityReport,
   calculateOfficerActivity,
@@ -466,6 +467,16 @@ async function handleActivityReport(interaction) {
     });
 
     if (!dryRun) {
+      await issueActivityStrikeRecords({
+        guild: interaction.guild,
+        client: interaction.client,
+        findings: report.findings.filter((finding) => finding.autoStrikeCreated && finding.autoStrikeLevel === 1),
+        staffUser: interaction.user,
+        activityConfig,
+        cycleStart: cycleRange.cycleStart,
+        cycleEnd: cycleRange.cycleEnd
+      });
+
       await notifyActivityStatusUsers({
         client: interaction.client,
         guild: interaction.guild,
@@ -653,7 +664,7 @@ function buildActivityNotificationMessage({ user, guild, finding, cycleStart, cy
       serverConfig,
       appealType: 'strike',
       officerId: user.id,
-      caseId: getFindingId(finding) || `activity-strike-${inactiveStreak}`
+      caseId: `activity-strike-${inactiveStreak}-${getFindingId(finding) || 'unknown'}`
     });
     if (appealButtonRow) messageOptions.components = [appealButtonRow];
   }
@@ -758,6 +769,15 @@ async function handleActivityReviewButton(interaction) {
   let dmAttempted = false;
   if (outcome === 'manual' && getFindingInactiveStreak(finding) >= 2) {
     dmAttempted = true;
+    await issueActivityStrikeRecords({
+      guild: interaction.guild,
+      client: interaction.client,
+      findings: [finding],
+      staffUser: interaction.user,
+      activityConfig: serverConfig?.duty?.activity || {},
+      cycleStart: finding.cycle_start,
+      cycleEnd: finding.cycle_end
+    });
     dmSent = await sendManualActivityWarningDm({
       client: interaction.client,
       guild: interaction.guild,
@@ -789,6 +809,37 @@ async function handleActivityReviewButton(interaction) {
     )]
   });
   return true;
+}
+
+async function issueActivityStrikeRecords({ guild, client, findings, staffUser, activityConfig, cycleStart, cycleEnd }) {
+  for (const finding of findings) {
+    const strikeLevel = getFindingInactiveStreak(finding) || finding.autoStrikeLevel || 1;
+    if (strikeLevel < 1 || strikeLevel > 3) continue;
+
+    await issueOfficerStrike({
+      guild,
+      client,
+      serverConfig,
+      officerUserId: getFindingUserId(finding),
+      staffUser,
+      strikeLevel,
+      details: {
+        reason: `Activity requirement not met for ${formatDateOnly(cycleStart)} through ${formatDateOnly(cycleEnd)}. Recorded hours: ${formatHours(getFindingTotalSeconds(finding))}.`,
+        evidence: `Activity finding ${getFindingId(finding) || 'unknown'}.`,
+        nextSteps: getActivityStrikeNextSteps(strikeLevel, activityConfig)
+      },
+      category: 'activity',
+      sendDm: false,
+      caseId: getFindingId(finding),
+      changedAt: new Date()
+    }).catch((error) => console.warn(`[activity-report] activity strike helper failed for ${getFindingUserId(finding)}:`, error.message || error));
+  }
+}
+
+function getActivityStrikeNextSteps(strikeLevel, activityConfig) {
+  if (strikeLevel >= 3) return 'Final activity warning issued after Command review.';
+  if (strikeLevel === 2) return 'Second activity warning issued after Command review.';
+  return activityConfig?.discipline?.strike1Label || 'Activity Strike 1 issued automatically.';
 }
 
 async function sendManualActivityWarningDm({ client, guild, finding, reviewerUser }) {

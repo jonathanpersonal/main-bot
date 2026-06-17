@@ -302,6 +302,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
   const submittedAt = new Date();
   const answers = getAppealAnswers(interaction, typeConfig);
   const strikeLevel = appealType === 'strike' ? getStrikeLevelFromCaseId(caseId) : null;
+  const strikeCategory = appealType === 'strike' ? getStrikeCategoryFromCaseId(caseId) : null;
   const pendingTagId = getConfiguredTagId(serverConfig, 'pending');
   const appliedTags = pendingTagId ? [pendingTagId] : [];
   const title = sanitizeThreadTitle(`Appeal - ${typeConfig.label} - ${officerDisplayName} - ${appealId}`);
@@ -313,7 +314,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
       name: title,
       appliedTags,
       message: {
-        content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel })]
+        content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel, strikeCategory })]
           .filter(Boolean)
           .join('\n\n'),
         components: buildStaffActionRows({ appealType, officerId, appealId })
@@ -325,7 +326,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
       thread = await forum.threads.create({
         name: title,
         message: {
-          content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel })]
+          content: [mentionLine, buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel, strikeCategory })]
             .filter(Boolean)
             .join('\n\n'),
           components: buildStaffActionRows({ appealType, officerId, appealId })
@@ -638,11 +639,13 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
 
   if (isApproval && appealType === 'strike') {
     const strikeLevel = await getStrikeLevelFromThread(interaction.channel);
+    const strikeCategory = await getStrikeCategoryFromThread(interaction.channel);
     strikeRemovalResult = await removeStrikeRole({
       guild: interaction.guild,
       serverConfig,
       officerId,
       strikeLevel,
+      strikeCategory,
       appealId
     });
   }
@@ -702,8 +705,8 @@ function buildFinalDecisionSummary({ decision, staffUser, reason, comments, next
   ].join('\n');
 }
 
-async function removeStrikeRole({ guild, serverConfig, officerId, strikeLevel, appealId }) {
-  const configuredRoleId = strikeLevel ? serverConfig?.appeals?.strikeRoleIds?.[strikeLevel] : null;
+async function removeStrikeRole({ guild, serverConfig, officerId, strikeLevel, strikeCategory = 'general', appealId }) {
+  const configuredRoleId = strikeLevel ? getAppealStrikeRoleId(serverConfig, strikeLevel, strikeCategory) : null;
 
   if (!strikeLevel) {
     return {
@@ -716,7 +719,7 @@ async function removeStrikeRole({ guild, serverConfig, officerId, strikeLevel, a
     return {
       removed: false,
       strikeLevel,
-      message: `No strike role was removed because no role is configured for strike level ${strikeLevel}.`
+      message: `No strike role was removed because no role is configured for ${strikeCategory} strike level ${strikeLevel}.`
     };
   }
 
@@ -740,12 +743,12 @@ async function removeStrikeRole({ guild, serverConfig, officerId, strikeLevel, a
   }
 
   try {
-    await member.roles.remove(configuredRoleId, `Strike appeal ${appealId} approved; removing strike level ${strikeLevel}.`);
+    await member.roles.remove(configuredRoleId, `Strike appeal ${appealId} approved; removing ${strikeCategory} strike level ${strikeLevel}.`);
     return {
       removed: true,
       strikeLevel,
       roleId: configuredRoleId,
-      message: `Removed strike level ${strikeLevel} role <@&${configuredRoleId}> from the officer.`
+      message: `Removed ${strikeCategory} strike level ${strikeLevel} role <@&${configuredRoleId}> from the officer.`
     };
   } catch (error) {
     console.warn(`Could not remove strike level ${strikeLevel} role ${configuredRoleId} from ${officerId}:`, error);
@@ -762,6 +765,21 @@ async function getStrikeLevelFromThread(thread) {
   const starterContent = await fetchThreadStarterContent(thread);
   const match = starterContent?.match(/^Strike Level:\s*(\d+)/im);
   return match ? Number(match[1]) : null;
+}
+
+async function getStrikeCategoryFromThread(thread) {
+  const starterContent = await fetchThreadStarterContent(thread);
+  const match = starterContent?.match(/^Strike Category:\s*(.+)$/im);
+  return normalizeStrikeCategory(match?.[1]);
+}
+
+function getAppealStrikeRoleId(serverConfig, strikeLevel, strikeCategory) {
+  if (strikeCategory === 'activity') {
+    const mode = serverConfig?.duty?.activity?.discipline?.strikeRoleMode || 'none';
+    if (mode === 'none') return null;
+    if (mode === 'separate') return serverConfig?.duty?.activity?.discipline?.activityStrikeRoleIds?.[strikeLevel] || null;
+  }
+  return serverConfig?.appeals?.strikeRoleIds?.[strikeLevel] || null;
 }
 
 async function fetchThreadStarterContent(thread) {
@@ -849,7 +867,7 @@ function getAppealAnswers(interaction, typeConfig) {
   }));
 }
 
-function buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel }) {
+function buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, answers, strikeLevel, strikeCategory }) {
   const timestamp = Math.floor(submittedAt.getTime() / 1000);
   const lines = [
     `A ${appealType} appeal has been submitted. Please review the information below.`,
@@ -859,6 +877,7 @@ function buildAppealThreadBody({ appealType, appealId, officerId, submittedAt, a
     `Appeal Type: ${appealType}`,
     `Appeal ID: ${appealId}`,
     ...(strikeLevel ? [`Strike Level: ${strikeLevel}`] : []),
+    ...(strikeCategory ? [`Strike Category: ${strikeCategory}`] : []),
     `Submitted At: <t:${timestamp}:F>`,
     '',
     '**Appeal Answers**'
@@ -1092,12 +1111,21 @@ async function safeThreadSend(thread, content) {
 }
 
 function getStrikeLevelFromCaseId(caseId) {
-  const match = String(caseId || '').match(/^st([123])-/i);
+  const text = String(caseId || '');
+  const match = text.match(/^st([123])-/i) || text.match(/^activity-strike-([123])-/i);
   return match ? Number(match[1]) : null;
 }
 
 function isActivityStrikeCaseId(caseId) {
   return /^(AF-|activity-strike)/i.test(String(caseId || ''));
+}
+
+function getStrikeCategoryFromCaseId(caseId) {
+  return isActivityStrikeCaseId(caseId) ? 'activity' : 'general';
+}
+
+function normalizeStrikeCategory(value) {
+  return String(value || '').trim().toLowerCase() === 'activity' ? 'activity' : 'general';
 }
 
 function generateAppealId() {
