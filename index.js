@@ -4,6 +4,7 @@ const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const { loadCommands } = require('./handlers/commandHandler');
 const { validateServerConfig } = require('./utils/configUtils');
 const { handleAppealInteraction } = require('./utils/appealUtils');
+const { startLoaDailySyncScheduler } = require('./utils/loaSync');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -13,6 +14,12 @@ client.commands = new Collection();
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
+
+  try {
+    startLoaDailySyncScheduler(readyClient);
+  } catch (error) {
+    console.error('Could not start LOA daily sync scheduler:', error);
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

@@ -1,4 +1,4 @@
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const serverConfig = require('../config/serverConfig');
 const { getMemberRank } = require('../utils/rankUtils');
 const {
@@ -7,8 +7,20 @@ const {
   clockInUser,
   clockOutUser,
   formatDuration,
-  getRecentTimecards
+  getRecentTimecards,
+  createLoaRequest,
+  updateLoaApprovalMessage,
+  getLoaRequestById,
+  approveLoaRequest,
+  denyLoaRequest,
+  markLoaRoleAdded,
+  updateLoaSyncStatus,
+  calculateDurationDays,
+  parseDateInput,
+  formatDateOnly
 } = require('../utils/dutyUtils');
+const { sendDutyLog } = require('../utils/logUtils');
+const { runLoaDailySync } = require('../utils/loaSync');
 
 const DUTY_EMBED_COLOR = 0x2ecc71;
 const ERROR_EMBED_COLOR = 0xe74c3c;
@@ -39,7 +51,16 @@ module.exports = {
       .setDescription('View your current duty status.'))
     .addSubcommand((subcommand) => subcommand
       .setName('recent')
-      .setDescription('View your last 10 completed duty timecards.')),
+      .setDescription('View your last 10 completed duty timecards.'))
+    .addSubcommand((subcommand) => subcommand
+      .setName('loa')
+      .setDescription('Submit a leave of absence request.'))
+    .addSubcommand((subcommand) => subcommand
+      .setName('loa-sync')
+      .setDescription('Manually run the LOA daily role sync.')
+      .addBooleanOption((option) => option
+        .setName('dry-run')
+        .setDescription('Preview changes without adding or removing roles.'))),
 
   async execute(interaction) {
     if (!serverConfig?.duty?.enabled) {
@@ -58,13 +79,17 @@ module.exports = {
       if (subcommand === 'clock-out') return handleClockOut(interaction);
       if (subcommand === 'status') return handleStatus(interaction);
       if (subcommand === 'recent') return handleRecent(interaction);
+      if (subcommand === 'loa') return handleLoa(interaction);
+      if (subcommand === 'loa-sync') return handleLoaSync(interaction);
 
       return interaction.reply({ content: 'Unknown duty subcommand.', ephemeral: true });
     } catch (error) {
       console.error('Duty command error:', error);
       return replyFriendlyError(interaction);
     }
-  }
+  },
+  handleModalSubmit,
+  handleButton
 };
 
 async function handleClockIn(interaction) {
@@ -160,7 +185,7 @@ async function handleClockOut(interaction) {
     console.warn(`Could not DM duty timecard ${timecard.timecardId} to user ${interaction.user.id}:`, error);
   }
 
-  await sendDutyLog(interaction, logEmbed);
+  await sendDutyTimecardLog(interaction, logEmbed);
 
   // TODO: Send completed timecards to the future Google duty webhook when googleWebhook.enabled is true.
 
@@ -227,6 +252,163 @@ async function handleRecent(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
+async function handleLoa(interaction) {
+  const loaConfig = serverConfig?.duty?.loa || {};
+  if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', ephemeral: true });
+  if (!loaConfig.approvalChannelId) return interaction.reply({ content: 'The LOA approval channel has not been configured.', ephemeral: true });
+
+  const modal = new ModalBuilder().setCustomId('duty_loa_request').setTitle('LOA Request');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('start_date').setLabel('Start date (YYYY-MM-DD)').setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('end_date').setLabel('End date (YYYY-MM-DD)').setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Reason').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('comments').setLabel('Additional comments').setStyle(TextInputStyle.Paragraph).setRequired(false))
+  );
+  return interaction.showModal(modal);
+}
+
+async function handleLoaSync(interaction) {
+  const loaConfig = serverConfig?.duty?.loa || {};
+  const approverRoleIds = loaConfig.approverRoleIds || [];
+  if (!approverRoleIds.length) return interaction.reply({ content: 'LOA approver roles are not configured.', ephemeral: true });
+  if (!memberHasAnyRole(interaction.member, approverRoleIds)) return interaction.reply({ content: 'You do not have permission to run LOA sync.', ephemeral: true });
+
+  const dryRun = interaction.options.getBoolean('dry-run') || false;
+  await interaction.deferReply({ ephemeral: true });
+  const summary = await runLoaDailySync(interaction.client, { guildId: interaction.guildId, dryRun, triggeredBy: interaction.user.id });
+  const details = summary.details.slice(0, 8).map((detail) => `- ${detail.loaId}: ${detail.message}`).join('\n') || '- No LOAs needed action.';
+  return interaction.editReply(`LOA Sync Complete\n\nMode: ${dryRun ? 'Dry Run' : 'Live'}\nAdded: ${summary.added}\nRemoved: ${summary.removed}\nAlready correct: ${summary.alreadyCorrect}\nSkipped: ${summary.skipped}\nErrors: ${summary.errors}\n\nDetails:\n${details}`);
+}
+
+async function handleModalSubmit(interaction) {
+  if (interaction.customId !== 'duty_loa_request') return false;
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  const loaConfig = serverConfig?.duty?.loa || {};
+  if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', ephemeral: true }).then(() => true);
+
+  const startDateValue = interaction.fields.getTextInputValue('start_date').trim();
+  const endDateValue = interaction.fields.getTextInputValue('end_date').trim();
+  const reason = interaction.fields.getTextInputValue('reason').trim();
+  const comments = interaction.fields.getTextInputValue('comments')?.trim() || '';
+  const startDate = parseDateInput(startDateValue);
+  const endDate = parseDateInput(endDateValue);
+  if (!startDate) return interaction.reply({ content: 'Start date must be valid and use YYYY-MM-DD.', ephemeral: true }).then(() => true);
+  if (!endDate) return interaction.reply({ content: 'End date must be valid and use YYYY-MM-DD.', ephemeral: true }).then(() => true);
+  if (endDate < startDate) return interaction.reply({ content: 'End date cannot be before start date.', ephemeral: true }).then(() => true);
+  if (!reason) return interaction.reply({ content: 'Reason is required.', ephemeral: true }).then(() => true);
+
+  const durationDays = calculateDurationDays(startDateValue, endDateValue);
+  if (durationDays < (loaConfig.minDays || 7)) return interaction.reply({ content: `LOA requests must be at least ${loaConfig.minDays || 7} days.`, ephemeral: true }).then(() => true);
+
+  await ensureDutyTables();
+  const loa = await createLoaRequest({ guildId: interaction.guildId, userId: interaction.user.id, startDate: startDateValue, endDate: endDateValue, durationDays, reason, comments });
+  const exceptionRequired = durationDays > (loaConfig.maxDaysWithoutCommandException || 60);
+  const approvalChannel = await interaction.guild.channels.fetch(loaConfig.approvalChannelId).catch(() => null);
+  if (!approvalChannel || typeof approvalChannel.send !== 'function') return interaction.reply({ content: 'The configured LOA approval channel could not be found.', ephemeral: true }).then(() => true);
+
+  const message = await approvalChannel.send({ embeds: [buildLoaEmbed(loa, 'Pending', exceptionRequired)], components: [buildLoaButtons(loa.loa_id, false)] });
+  await updateLoaApprovalMessage({ loaId: loa.loa_id, channelId: message.channel.id, messageId: message.id });
+  await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'LOA submitted', fields: loaLogFields(loa, interaction.user.id) });
+  // TODO: Send approved LOAs to a future Google handoff integration after that feature is designed.
+  await interaction.reply({ content: `Your LOA request has been submitted for staff approval. LOA ID: ${loa.loa_id}`, ephemeral: true });
+  return true;
+}
+
+async function handleButton(interaction) {
+  if (!interaction.customId.startsWith('duty_loa_approve:') && !interaction.customId.startsWith('duty_loa_deny:')) return false;
+  const [action, loaId] = interaction.customId.split(':');
+  const loaConfig = serverConfig?.duty?.loa || {};
+  const approverRoleIds = loaConfig.approverRoleIds || [];
+  if (!approverRoleIds.length) return interaction.reply({ content: 'LOA approver roles are not configured.', ephemeral: true }).then(() => true);
+  if (!memberHasAnyRole(interaction.member, approverRoleIds)) return interaction.reply({ content: 'You do not have permission to review LOA requests.', ephemeral: true }).then(() => true);
+  // TODO: Replace button-only review with a notes modal for approval/denial notes.
+
+  await interaction.deferReply({ ephemeral: true });
+  const existing = await getLoaRequestById(loaId);
+  if (!existing) { await interaction.editReply('That LOA request could not be found.'); return true; }
+  if (existing.status !== 'pending') { await interaction.editReply(`That LOA request is already ${existing.status}.`); return true; }
+
+  const approved = action === 'duty_loa_approve';
+  const loa = approved ? await approveLoaRequest({ loaId, reviewedBy: interaction.user.id }) : await denyLoaRequest({ loaId, reviewedBy: interaction.user.id });
+  let roleMessage = 'No LOA role changes were made.';
+  let roleError = null;
+  if (approved) {
+    const today = formatDateOnly(new Date());
+    if (today >= formatDateOnly(loa.start_date) && today <= formatDateOnly(loa.end_date)) {
+      try {
+        const member = await interaction.guild.members.fetch(loa.user_id);
+        if (loaConfig.loaRoleId && !member.roles.cache.has(loaConfig.loaRoleId)) {
+          await member.roles.add(loaConfig.loaRoleId, `Approved active LOA ${loa.loa_id}`);
+          await markLoaRoleAdded({ loaId });
+          await updateLoaSyncStatus({ loaId, status: 'role_added_on_approval', error: null });
+          roleMessage = 'The LOA role was applied now.';
+          await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'LOA role added immediately on approval', fields: loaLogFields(loa, interaction.user.id) });
+        } else roleMessage = loaConfig.loaRoleId ? 'The officer already had the LOA role.' : 'LOA role is not configured.';
+      } catch (error) { roleError = error.message || String(error); roleMessage = `The LOA was approved, but adding the LOA role failed: ${roleError}`; }
+    } else if (today < formatDateOnly(loa.start_date)) {
+      roleMessage = 'The LOA role will be applied automatically on the start date.';
+      await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'LOA role scheduled for future start', fields: loaLogFields(loa, interaction.user.id) });
+    } else roleMessage = 'The approved LOA date range has already ended, so no role was added.';
+  }
+
+  await notifyLoaUser(interaction.client, loa, approved, roleMessage);
+  await interaction.message.edit({ embeds: [buildLoaEmbed(loa, approved ? 'Approved' : 'Denied', loa.duration_days > (loaConfig.maxDaysWithoutCommandException || 60))], components: [buildLoaButtons(loa.loa_id, true)] }).catch(() => null);
+  await sendDutyLog({ guild: interaction.guild, serverConfig, title: approved ? 'LOA approved' : 'LOA denied', fields: loaLogFields(loa, interaction.user.id) });
+  // TODO: Officer management promotion/demotion/termination blocking should check active approved LOAs in a future integration.
+  await interaction.editReply(`${approved ? 'Approved' : 'Denied'} ${loa.loa_id}. ${roleMessage}`);
+  return true;
+}
+
+function buildLoaEmbed(loa, status, exceptionRequired) {
+  return new EmbedBuilder().setTitle(`LOA Request - ${status}`).setColor(status === 'Approved' ? DUTY_EMBED_COLOR : status === 'Denied' ? ERROR_EMBED_COLOR : 0xf1c40f).addFields([
+    { name: 'Officer', value: `<@${loa.user_id}>`, inline: true },
+    { name: 'LOA ID', value: loa.loa_id, inline: true },
+    { name: 'Status', value: status, inline: true },
+    { name: 'Start date', value: formatDateOnly(loa.start_date), inline: true },
+    { name: 'End date', value: formatDateOnly(loa.end_date), inline: true },
+    { name: 'Duration', value: `${loa.duration_days} days`, inline: true },
+    { name: 'Command exception required', value: exceptionRequired ? 'Yes' : 'No', inline: true },
+    { name: 'Reason', value: truncateField(loa.reason), inline: false },
+    { name: 'Comments', value: truncateField(loa.comments || 'None'), inline: false }
+  ]).setTimestamp(new Date());
+}
+
+function buildLoaButtons(loaId, disabled) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`duty_loa_approve:${loaId}`).setLabel('Approve').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`duty_loa_deny:${loaId}`).setLabel('Deny').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+  );
+}
+
+function memberHasAnyRole(member, roleIds) {
+  return roleIds.some((roleId) => member?.roles?.cache?.has(String(roleId)));
+}
+
+function loaLogFields(loa, staffUserId) {
+  return [
+    { name: 'LOA ID', value: loa.loa_id, inline: true },
+    { name: 'Officer', value: `<@${loa.user_id}>`, inline: true },
+    { name: 'Staff/trigger', value: staffUserId ? `<@${staffUserId}>` : 'System', inline: true },
+    { name: 'Start date', value: formatDateOnly(loa.start_date), inline: true },
+    { name: 'End date', value: formatDateOnly(loa.end_date), inline: true },
+    { name: 'Status', value: loa.status || 'pending', inline: true }
+  ];
+}
+
+async function notifyLoaUser(client, loa, approved, roleMessage) {
+  const user = await client.users.fetch(loa.user_id).catch(() => null);
+  if (!user) return false;
+  const content = approved
+    ? `Your LOA request has been approved.\n\nLOA ID: ${loa.loa_id}\nStart date: ${formatDateOnly(loa.start_date)}\nEnd date: ${formatDateOnly(loa.end_date)}\nDuration: ${loa.duration_days} days\n${roleMessage}\n\nWhile on active approved LOA, your activity is exempt.`
+    : `Your LOA request has been denied.\n\nLOA ID: ${loa.loa_id}\nStart date: ${formatDateOnly(loa.start_date)}\nEnd date: ${formatDateOnly(loa.end_date)}\n\nPlease contact Command Staff with questions.`;
+  return user.send({ content }).then(() => true).catch(() => false);
+}
+
+function truncateField(value) {
+  const text = String(value || 'None');
+  return text.length > 1024 ? `${text.slice(0, 1021)}...` : text;
+}
+
 function buildTimecardEmbed({ title, user, timecard, dutyTypeLabel, clockInUnix, clockOutUnix, duration }) {
   return new EmbedBuilder()
     .setTitle(title)
@@ -243,7 +425,7 @@ function buildTimecardEmbed({ title, user, timecard, dutyTypeLabel, clockInUnix,
     .setTimestamp(timecard.clockOutAt);
 }
 
-async function sendDutyLog(interaction, embed) {
+async function sendDutyTimecardLog(interaction, embed) {
   const logChannelId = serverConfig?.duty?.logChannelId
     || serverConfig?.logging?.staffLogChannelId;
 

@@ -84,8 +84,70 @@ async function ensureDutyTables() {
     )
   `);
 
-  // TODO: Future Duty phases may add duty_loa_requests, duty_timecard_corrections,
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS duty_loa_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      loa_id VARCHAR(64) NOT NULL UNIQUE,
+      guild_id VARCHAR(32) NOT NULL,
+      user_id VARCHAR(32) NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      duration_days INT NOT NULL,
+      reason TEXT NOT NULL,
+      comments TEXT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'pending',
+      requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME NULL,
+      reviewed_by VARCHAR(32) NULL,
+      review_notes TEXT NULL,
+      approval_message_id VARCHAR(32) NULL,
+      approval_channel_id VARCHAR(32) NULL,
+      loa_role_added_at DATETIME NULL,
+      loa_role_removed_at DATETIME NULL,
+      last_sync_at DATETIME NULL,
+      last_sync_status VARCHAR(64) NULL,
+      last_sync_error TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_loa_guild_user_created (guild_id, user_id, created_at),
+      INDEX idx_loa_status (guild_id, status),
+      INDEX idx_loa_dates (guild_id, start_date, end_date)
+    )
+  `);
+
+  await ensureDutyLoaColumns();
+
+  // TODO: Future Duty phases may add duty_timecard_corrections,
   // duty_activity_cycles, and duty_activity_findings tables.
+
+}
+
+async function ensureDutyLoaColumns() {
+  const columnDefinitions = {
+    comments: 'TEXT NULL',
+    reviewed_at: 'DATETIME NULL',
+    reviewed_by: 'VARCHAR(32) NULL',
+    review_notes: 'TEXT NULL',
+    approval_message_id: 'VARCHAR(32) NULL',
+    approval_channel_id: 'VARCHAR(32) NULL',
+    loa_role_added_at: 'DATETIME NULL',
+    loa_role_removed_at: 'DATETIME NULL',
+    last_sync_at: 'DATETIME NULL',
+    last_sync_status: 'VARCHAR(64) NULL',
+    last_sync_error: 'TEXT NULL',
+    created_at: 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    updated_at: 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+  };
+
+  const existingColumns = await query('SHOW COLUMNS FROM duty_loa_requests');
+  const existingColumnNames = new Set(existingColumns.map((column) => column.Field));
+
+  for (const [columnName, definition] of Object.entries(columnDefinitions)) {
+    if (!existingColumnNames.has(columnName)) {
+      await query(`ALTER TABLE duty_loa_requests ADD COLUMN ${columnName} ${definition}`);
+    }
+  }
 }
 
 module.exports = {

@@ -424,11 +424,22 @@ Internal Affairs Team`
     ],
 
     loa: {
-      enabled: false,
+      enabled: true,
+
       approvalChannelId: '',
       loaRoleId: '',
+      approverRoleIds: [],
+
       minDays: 7,
       maxDaysWithoutCommandException: 60,
+
+      dailySync: {
+        enabled: true,
+        time: '09:00',
+        timezone: 'America/New_York',
+        runOnStartup: true
+      },
+
       exemptFromActivity: true,
       blocksPromotion: true,
       blocksDemotion: true,

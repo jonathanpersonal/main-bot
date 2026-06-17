@@ -123,12 +123,126 @@ async function getRecentTimecards(guildId, userId, limit = 10) {
   );
 }
 
+function createLoaId() {
+  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `LOA-${datePart}-${randomPart}`;
+}
+
+async function createLoaRequest({ guildId, userId, startDate, endDate, durationDays, reason, comments }) {
+  let lastError;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const loaId = createLoaId();
+    try {
+      await query(
+        `INSERT INTO duty_loa_requests
+          (loa_id, guild_id, user_id, start_date, end_date, duration_days, reason, comments, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [loaId, guildId, userId, startDate, endDate, durationDays, reason, comments || null]
+      );
+      return getLoaRequestById(loaId);
+    } catch (error) {
+      lastError = error;
+      if (error.code !== 'ER_DUP_ENTRY') throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function getLoaRequestById(loaId) {
+  const rows = await query('SELECT * FROM duty_loa_requests WHERE loa_id = ? LIMIT 1', [loaId]);
+  return rows[0] || null;
+}
+
+async function updateLoaApprovalMessage({ loaId, channelId, messageId }) {
+  await query('UPDATE duty_loa_requests SET approval_channel_id = ?, approval_message_id = ? WHERE loa_id = ?', [channelId, messageId, loaId]);
+}
+
+async function approveLoaRequest({ loaId, reviewedBy, reviewNotes }) {
+  await query("UPDATE duty_loa_requests SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_notes = ? WHERE loa_id = ?", [reviewedBy, reviewNotes || null, loaId]);
+  return getLoaRequestById(loaId);
+}
+
+async function denyLoaRequest({ loaId, reviewedBy, reviewNotes }) {
+  await query("UPDATE duty_loa_requests SET status = 'denied', reviewed_by = ?, reviewed_at = NOW(), review_notes = ? WHERE loa_id = ?", [reviewedBy, reviewNotes || null, loaId]);
+  return getLoaRequestById(loaId);
+}
+
+async function getActiveApprovedLoa(guildId, userId) {
+  const today = formatDateOnly(new Date());
+  const rows = await query(
+    "SELECT * FROM duty_loa_requests WHERE guild_id = ? AND user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ? ORDER BY end_date DESC LIMIT 1",
+    [guildId, userId, today, today]
+  );
+  return rows[0] || null;
+}
+
+async function getApprovedLoasForSync(guildId = null) {
+  const today = formatDateOnly(new Date());
+  const guildWhere = guildId ? 'AND guild_id = ?' : '';
+  const params = guildId ? [today, today, guildId] : [today, today];
+  return query(
+    `SELECT * FROM duty_loa_requests
+     WHERE status = 'approved'
+       AND (end_date >= ? OR (end_date < ? AND loa_role_removed_at IS NULL))
+       ${guildWhere}
+     ORDER BY guild_id, start_date, end_date`,
+    params
+  );
+}
+
+async function markLoaRoleAdded({ loaId }) {
+  await query('UPDATE duty_loa_requests SET loa_role_added_at = COALESCE(loa_role_added_at, NOW()), loa_role_removed_at = NULL WHERE loa_id = ?', [loaId]);
+}
+
+async function markLoaRoleRemoved({ loaId }) {
+  await query('UPDATE duty_loa_requests SET loa_role_removed_at = COALESCE(loa_role_removed_at, NOW()) WHERE loa_id = ?', [loaId]);
+}
+
+async function updateLoaSyncStatus({ loaId, status, error }) {
+  await query('UPDATE duty_loa_requests SET last_sync_at = NOW(), last_sync_status = ?, last_sync_error = ? WHERE loa_id = ?', [status, error ? String(error).slice(0, 1000) : null, loaId]);
+}
+
+function calculateDurationDays(startDate, endDate) {
+  const start = parseDateInput(startDate);
+  const end = parseDateInput(endDate);
+  if (!start || !end) return null;
+  return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+}
+
+function parseDateInput(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())) return null;
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date;
+}
+
+function formatDateOnly(dateValue) {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  return date.toISOString().slice(0, 10);
+}
+
 module.exports = {
   ensureDutyTables,
   getActiveDutySession,
   clockInUser,
   clockOutUser,
   createTimecardId,
+  createLoaId,
+  createLoaRequest,
+  getLoaRequestById,
+  updateLoaApprovalMessage,
+  approveLoaRequest,
+  denyLoaRequest,
+  getActiveApprovedLoa,
+  getApprovedLoasForSync,
+  markLoaRoleAdded,
+  markLoaRoleRemoved,
+  updateLoaSyncStatus,
+  calculateDurationDays,
+  parseDateInput,
+  formatDateOnly,
   formatDuration,
   getRecentTimecards
 };
