@@ -465,6 +465,36 @@ async function sendDutyLog({ guild, serverConfig, title, color = 0x5865f2, field
   }
 }
 
+
+async function sendTicketLog({ guild, serverConfig, title, details, fields = [], color = 0x5865f2, changedAt = new Date() }) {
+  const ticketLogChannelId = serverConfig?.tickets?.logChannelId || serverConfig?.logChannels?.ticketLogs || serverConfig?.logging?.staffLogChannelId;
+
+  if (!ticketLogChannelId || ticketLogChannelId === 'PUT_STAFF_LOG_CHANNEL_ID_HERE') {
+    console.warn(`Ticket log channel is not configured. Skipping ${title || 'ticket log'}.`);
+    return false;
+  }
+
+  if (!guild || !guild.channels) {
+    console.warn(`Could not send ${title || 'ticket log'} because no guild was available.`);
+    return false;
+  }
+
+  try {
+    const channel = guild.channels.cache.get(ticketLogChannelId) || await guild.channels.fetch(ticketLogChannelId);
+    if (!channel || typeof channel.send !== 'function') return false;
+    const embed = new EmbedBuilder()
+      .setTitle(title || 'Ticket Log')
+      .setColor(color)
+      .addFields(fields.length > 0 ? fields : [{ name: 'Details', value: safeFieldValue(details || 'No details provided.'), inline: false }])
+      .setTimestamp(changedAt);
+    await channel.send({ embeds: [embed] });
+    return true;
+  } catch (error) {
+    console.warn(`Could not send ${title || 'ticket log'}:`, error);
+    return false;
+  }
+}
+
 function buildRoleResultFields(roleResult) {
   return [
     { name: 'Roles added', value: safeFieldValue(roleResult?.added?.join(', ') || 'None'), inline: false },
@@ -486,5 +516,6 @@ module.exports = {
   sendCadetTrainingLog,
   sendDutyLog,
   sendOfficerActionLog,
-  sendOfficerRankChangeLog
+  sendOfficerRankChangeLog,
+  sendTicketLog
 };

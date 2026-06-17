@@ -634,7 +634,21 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
 
   let strikeRemovalResult = null;
   if (isApproval && appealType === 'termination') {
-    // TODO: Later automatically open an appeal reinstatement ticket and ping configured command role.
+    // TODO: When a TERMINATION appeal is approved, create the system reinstatement ticket with:
+    // await createSystemTicket({
+    //   guild: interaction.guild,
+    //   typeId: 'reinstatement',
+    //   targetUser: officerUser,
+    //   createdBy: interaction.user,
+    //   reason: 'Termination appeal approved',
+    //   metadata: {
+    //     terminationCaseId: undefined,
+    //     appealCaseId: appealId,
+    //     approvedBy: interaction.user.id,
+    //     approvalReason: reason
+    //   }
+    // });
+    // Do not create reinstatement tickets for strike, demotion, coaching, resignation, or general appeals.
   }
 
   if (isApproval && appealType === 'strike') {
