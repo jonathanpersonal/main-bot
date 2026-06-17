@@ -11,6 +11,7 @@ const {
 
 const { getServerConfig } = require('./configUtils');
 const { sendAppealLog } = require('./logUtils');
+const { createSystemTicket } = require('./ticketUtils');
 
 const APPEAL_TYPES = {
   termination: {
@@ -633,22 +634,26 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
   }
 
   let strikeRemovalResult = null;
-  if (isApproval && appealType === 'termination') {
-    // TODO: When a TERMINATION appeal is approved, create the system reinstatement ticket with:
-    // await createSystemTicket({
-    //   guild: interaction.guild,
-    //   typeId: 'reinstatement',
-    //   targetUser: officerUser,
-    //   createdBy: interaction.user,
-    //   reason: 'Termination appeal approved',
-    //   metadata: {
-    //     terminationCaseId: undefined,
-    //     appealCaseId: appealId,
-    //     approvedBy: interaction.user.id,
-    //     approvalReason: reason
-    //   }
-    // });
-    // Do not create reinstatement tickets for strike, demotion, coaching, resignation, or general appeals.
+  if (isApproval && appealType === 'termination' && officerUser) {
+    try {
+      const reinstatementChannel = await createSystemTicket({
+        guild: interaction.guild,
+        typeId: 'reinstatement',
+        targetUser: officerUser,
+        createdBy: interaction.user,
+        reason: 'Termination appeal approved',
+        metadata: {
+          appealCaseId: appealId,
+          approvedBy: interaction.user.id,
+          approvalReason: reason
+        }
+      });
+
+      await safeThreadSend(interaction.channel, `Reinstatement ticket created: ${reinstatementChannel}`);
+    } catch (error) {
+      console.warn(`Could not create reinstatement ticket for appeal ${appealId}:`, error);
+      await safeThreadSend(interaction.channel, 'The termination appeal was approved, but the reinstatement ticket could not be created automatically. Please create one manually or check ticket configuration.');
+    }
   }
 
   if (isApproval && appealType === 'strike') {

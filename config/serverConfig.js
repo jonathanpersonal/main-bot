@@ -631,18 +631,174 @@ Internal Affairs Team`
     closeBehavior: 'archive',
     transcriptOnClose: true,
     lockdownPresets: [
-      { id: 'command_only', label: 'Command Staff Only', description: 'Only command staff can view this ticket.', allowedRoleIds: [], allowedUserIds: [] },
-      { id: 'ia_only', label: 'IA Only', description: 'Only IA staff can view this ticket.', allowedRoleIds: [], allowedUserIds: [] },
-      { id: 'dept_admin_only', label: 'Dept Admin Only', description: 'Only department admins can view this ticket.', allowedRoleIds: [], allowedUserIds: [] }
+      {
+        id: 'command_only',
+        label: 'Command Staff Only',
+        description: 'Only command staff and ticket admins can view this ticket.',
+        allowedRoleIds: [],
+        allowedUserIds: [],
+        includeTicketOpener: false
+      },
+      {
+        id: 'ia_only',
+        label: 'IA Only',
+        description: 'Only IA staff and ticket admins can view this ticket.',
+        allowedRoleIds: [],
+        allowedUserIds: [],
+        includeTicketOpener: false
+      },
+      {
+        id: 'dept_admin_only',
+        label: 'Dept Admin Only',
+        description: 'Only department admins and ticket admins can view this ticket.',
+        allowedRoleIds: [],
+        allowedUserIds: [],
+        includeTicketOpener: false
+      },
+      {
+        id: 'staff_and_opener',
+        label: 'Staff + Ticket Opener',
+        description: 'Keeps the ticket opener and configured staff/admin roles in the ticket.',
+        allowedRoleIds: [],
+        allowedUserIds: [],
+        includeTicketOpener: true
+      }
     ],
     types: [
-      { id: 'general_support', label: 'General Support', description: 'Open a general department support ticket.', emoji: '🎫', enabled: true, listed: true, systemOnly: false, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true },
-      { id: 'training_recruitment', label: 'Training Recruitment', description: 'Open a ticket for training or recruitment help.', emoji: '📋', enabled: true, listed: true, systemOnly: false, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true },
-      { id: 'contact_command_staff', label: 'Contact Command Staff', description: 'Privately contact command staff.', emoji: '⭐', enabled: true, listed: true, systemOnly: false, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true },
-      { id: 'rank_transfer', label: 'Rank Transfer', description: 'Request a rank transfer.', emoji: '🔁', enabled: false, listed: true, systemOnly: false, holdForLater: true, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true },
-      { id: 'ia', label: 'IA', description: 'Internal Affairs ticket.', emoji: '🕵️', enabled: true, listed: false, systemOnly: false, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true },
-      { id: 'dept_admin', label: 'Dept Admin', description: 'Department admin-only ticket.', emoji: '🛠️', enabled: true, listed: false, systemOnly: false, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true },
-      { id: 'reinstatement', label: 'Reinstatement', description: 'System-created ticket for approved termination appeals.', emoji: '♻️', enabled: true, listed: false, systemOnly: true, categoryId: '', routedRoleIds: [], allowRename: true, allowTransfer: true, allowLockdown: true, allowClaim: true, allowClose: true }
+      {
+        id: 'general_support',
+        label: 'General Support',
+        description: 'Open a general department support ticket.',
+        emoji: '🎫',
+
+        enabled: true,
+        listed: true,
+        systemOnly: false,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      },
+      {
+        id: 'training_recruitment',
+        label: 'Training Recruitment',
+        description: 'Open a ticket for training or recruitment help.',
+        emoji: '📋',
+
+        enabled: true,
+        listed: true,
+        systemOnly: false,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      },
+      {
+        id: 'contact_command_staff',
+        label: 'Contact Command Staff',
+        description: 'Privately contact command staff.',
+        emoji: '⭐',
+
+        enabled: true,
+        listed: true,
+        systemOnly: false,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      },
+      {
+        id: 'rank_transfer',
+        label: 'Rank Transfer',
+        description: 'Request a rank transfer.',
+        emoji: '🔁',
+
+        enabled: false,
+        listed: true,
+        systemOnly: false,
+        holdForLater: true,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      },
+      {
+        id: 'ia',
+        label: 'IA',
+        description: 'Internal Affairs ticket.',
+        emoji: '🕵️',
+
+        enabled: true,
+        listed: false,
+        systemOnly: false,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      },
+      {
+        id: 'dept_admin',
+        label: 'Dept Admin',
+        description: 'Department admin-only ticket.',
+        emoji: '🛠️',
+
+        enabled: true,
+        listed: false,
+        systemOnly: false,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      },
+      {
+        id: 'reinstatement',
+        label: 'Reinstatement',
+        description: 'System-created ticket for approved termination appeals.',
+        emoji: '♻️',
+
+        enabled: true,
+        listed: false,
+        systemOnly: true,
+
+        categoryId: '',
+        routedRoleIds: [],
+
+        allowRename: true,
+        allowTransfer: true,
+        allowLockdown: true,
+        allowClaim: true,
+        allowClose: true
+      }
     ]
   },
 
