@@ -460,8 +460,8 @@ Internal Affairs Team`
     corrections: {
       enabled: true,
 
-      approvalChannelId: '',
-      approverRoleIds: [],
+      approvalChannelId: '1516830234727415888',
+      approverRoleIds: [`1513618608134291458`],
 
       allowManualTimecardId: true,
       recentTimecardLimit: 10
