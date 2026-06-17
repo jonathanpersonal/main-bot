@@ -430,7 +430,7 @@ Internal Affairs Team`
       loaRoleId: '1516830414302482562',
       approverRoleIds: [1513618608134291458],
 
-      minDays: 7,
+      minDays: 3,
       maxDaysWithoutCommandException: 60,
 
       dailySync: {
