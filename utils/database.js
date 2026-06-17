@@ -150,7 +150,91 @@ async function ensureDutyTables() {
 
   await ensureDutyTimecardCorrectionColumns();
 
-  // TODO: Future Duty phases may add duty_activity_cycles and duty_activity_findings tables.
+  await query(`
+    CREATE TABLE IF NOT EXISTS duty_activity_cycles (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cycle_id VARCHAR(64) NOT NULL UNIQUE,
+
+      guild_id VARCHAR(32) NOT NULL,
+      cycle_start DATE NOT NULL,
+      cycle_end DATE NOT NULL,
+
+      status VARCHAR(32) NOT NULL DEFAULT 'generated',
+
+      generated_by VARCHAR(32) NULL,
+      generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+      dry_run BOOLEAN NOT NULL DEFAULT FALSE,
+
+      total_officers INT NOT NULL DEFAULT 0,
+      active_count INT NOT NULL DEFAULT 0,
+      semi_active_count INT NOT NULL DEFAULT 0,
+      inactive_count INT NOT NULL DEFAULT 0,
+      loa_count INT NOT NULL DEFAULT 0,
+      exempt_count INT NOT NULL DEFAULT 0,
+      recruit_pending_count INT NOT NULL DEFAULT 0,
+      error_count INT NOT NULL DEFAULT 0,
+
+      report_message_id VARCHAR(32) NULL,
+      report_channel_id VARCHAR(32) NULL,
+
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      INDEX idx_activity_cycles_guild_dates (guild_id, cycle_start, cycle_end)
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS duty_activity_findings (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      finding_id VARCHAR(64) NOT NULL UNIQUE,
+
+      cycle_id VARCHAR(64) NOT NULL,
+      guild_id VARCHAR(32) NOT NULL,
+      user_id VARCHAR(32) NOT NULL,
+
+      rank_key VARCHAR(128) NULL,
+      rank_name VARCHAR(128) NULL,
+
+      active_required_hours DECIMAL(6,2) NULL,
+      semi_active_required_hours DECIMAL(6,2) NULL,
+
+      total_seconds INT NOT NULL DEFAULT 0,
+      admin_seconds INT NOT NULL DEFAULT 0,
+      patrol_seconds INT NOT NULL DEFAULT 0,
+
+      total_hours DECIMAL(8,2) NOT NULL DEFAULT 0,
+      admin_hours DECIMAL(8,2) NOT NULL DEFAULT 0,
+      patrol_hours DECIMAL(8,2) NOT NULL DEFAULT 0,
+
+      activity_status VARCHAR(64) NOT NULL,
+      promotion_eligible BOOLEAN NOT NULL DEFAULT TRUE,
+
+      loa_exempt BOOLEAN NOT NULL DEFAULT FALSE,
+      exempt_reason VARCHAR(255) NULL,
+
+      inactive_streak INT NOT NULL DEFAULT 0,
+
+      discipline_action VARCHAR(64) NULL,
+      command_review_required BOOLEAN NOT NULL DEFAULT FALSE,
+      command_review_reason TEXT NULL,
+
+      auto_strike_created BOOLEAN NOT NULL DEFAULT FALSE,
+      auto_strike_level INT NULL,
+      auto_strike_reference VARCHAR(128) NULL,
+
+      notes TEXT NULL,
+
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+      UNIQUE KEY unique_cycle_user (cycle_id, user_id),
+      INDEX idx_findings_guild_user (guild_id, user_id),
+      INDEX idx_findings_status (guild_id, activity_status),
+      INDEX idx_findings_review (guild_id, command_review_required)
+    )
+  `);
 
 }
 

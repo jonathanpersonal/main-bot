@@ -468,8 +468,16 @@ Internal Affairs Team`
     },
 
     activity: {
-      enabled: false,
+      enabled: true,
       cycleLengthDays: 14,
+
+      reportChannelId: '1516851652139679894',
+      commandReviewChannelId: '1516851652139679894',
+
+      approverRoleIds: [],
+
+      includeRoleIds: [],
+      excludeRoleIds: [],
 
       semiActiveBlocksPromotion: true,
       loaExemptsFromActivity: true,
@@ -484,6 +492,12 @@ Internal Affairs Team`
 
         commandReviewAfterInactiveCycles: 2,
         terminationReviewAfterInactiveCycles: 3
+      },
+
+      scheduler: {
+        enabled: true,
+        cron: '0 9 */14 * *',
+        timezone: 'America/New_York'
       },
 
       rankRequirements: [
