@@ -74,6 +74,32 @@ Regards,
     }
   },
 
+  registration: {
+    enabled: true,
+
+    // Roles allowed to use /register other officer.
+    registerOtherPermissionRoleIds: [
+      // Example: 'ROLE_ID_HERE'
+    ],
+
+    // Rank keys are derived from rank.key when present, otherwise from the rank name.
+    // Example: "Supervisor in Training" becomes "supervisor_in_training".
+    emailRequiredRankKeys: [
+      'supervisor_in_training',
+      'supervisor',
+      'command',
+      'admin'
+    ],
+
+    // Used to remove callsigns from the beginning of display names.
+    callsignNamePatterns: [
+      '^\\[[A-Z0-9-]+\\]\\s*',
+      '^\\([A-Z0-9-]+\\)\\s*',
+      '^[A-Z0-9-]+\\s*\\|\\s*',
+      '^[A-Z0-9-]+\\s*-\\s*'
+    ]
+  },
+
 
   trainingManagement: {
     enabled: true,
