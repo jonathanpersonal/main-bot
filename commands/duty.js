@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, SlashCommandBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const serverConfig = require('../config/serverConfig');
 const { getMemberRank } = require('../utils/rankUtils');
 const {
@@ -17,7 +17,16 @@ const {
   updateLoaSyncStatus,
   calculateDurationDays,
   parseDateInput,
-  formatDateOnly
+  formatDateOnly,
+  getTimecardById,
+  createTimecardCorrection,
+  getCorrectionById,
+  updateCorrectionApprovalMessage,
+  approveTimecardCorrection,
+  denyTimecardCorrection,
+  applyApprovedTimecardCorrection,
+  parseDateTimeInput,
+  calculateDurationSeconds
 } = require('../utils/dutyUtils');
 const { sendDutyLog } = require('../utils/logUtils');
 const { runLoaDailySync } = require('../utils/loaSync');
@@ -56,6 +65,13 @@ module.exports = {
       .setName('loa')
       .setDescription('Submit a leave of absence request.'))
     .addSubcommand((subcommand) => subcommand
+      .setName('correction')
+      .setDescription('Request a correction to one of your completed duty timecards.')
+      .addStringOption((option) => option
+        .setName('timecard-id')
+        .setDescription('Optional timecard ID to correct, such as TC-20260617-ABCD.')
+        .setRequired(false)))
+    .addSubcommand((subcommand) => subcommand
       .setName('loa-sync')
       .setDescription('Manually run the LOA daily role sync.')
       .addBooleanOption((option) => option
@@ -80,6 +96,7 @@ module.exports = {
       if (subcommand === 'status') return handleStatus(interaction);
       if (subcommand === 'recent') return handleRecent(interaction);
       if (subcommand === 'loa') return handleLoa(interaction);
+      if (subcommand === 'correction') return handleCorrection(interaction);
       if (subcommand === 'loa-sync') return handleLoaSync(interaction);
 
       return interaction.reply({ content: 'Unknown duty subcommand.', ephemeral: true });
@@ -89,6 +106,7 @@ module.exports = {
     }
   },
   handleModalSubmit,
+  handleSelectMenu,
   handleButton
 };
 
@@ -252,6 +270,60 @@ async function handleRecent(interaction) {
   return interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
+
+async function handleCorrection(interaction) {
+  const correctionConfig = serverConfig?.duty?.corrections || {};
+  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', ephemeral: true });
+  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', ephemeral: true });
+
+  const manualTimecardId = interaction.options.getString('timecard-id')?.trim();
+  if (manualTimecardId) {
+    if (!correctionConfig.allowManualTimecardId) return interaction.reply({ content: 'Manual timecard ID correction requests are not enabled for this server.', ephemeral: true });
+    const timecard = await getTimecardById(interaction.guildId, manualTimecardId);
+    if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', ephemeral: true });
+    return interaction.showModal(buildCorrectionModal(timecard.timecard_id));
+  }
+
+  const limit = correctionConfig.recentTimecardLimit || 10;
+  const timecards = await getRecentTimecards(interaction.guildId, interaction.user.id, limit);
+  if (timecards.length === 0) {
+    const manualMessage = correctionConfig.allowManualTimecardId ? ' You can also run `/duty correction timecard-id:TC-...` if you know the timecard ID.' : '';
+    return interaction.reply({ content: `You do not have any recent completed duty timecards to correct.${manualMessage}`, ephemeral: true });
+  }
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('duty_correction_select')
+    .setPlaceholder('Choose a completed timecard to correct')
+    .addOptions(timecards.slice(0, 25).map((timecard) => {
+      const dutyType = getDutyType(timecard.duty_type);
+      return {
+        label: `${timecard.timecard_id} • ${dutyType?.label || timecard.duty_type}`.slice(0, 100),
+        description: `${formatDuration(timecard.duration_seconds)} • ${formatDateTimeForDisplay(timecard.clock_out_at)}`.slice(0, 100),
+        value: timecard.timecard_id
+      };
+    }));
+
+  const content = correctionConfig.allowManualTimecardId
+    ? 'Select one of your recent completed timecards, or run `/duty correction timecard-id:TC-...` to enter a specific timecard ID.'
+    : 'Select one of your recent completed timecards.';
+  return interaction.reply({ content, components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+}
+
+async function handleSelectMenu(interaction) {
+  if (interaction.customId !== 'duty_correction_select') return false;
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  const correctionConfig = serverConfig?.duty?.corrections || {};
+  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', ephemeral: true }).then(() => true);
+  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', ephemeral: true }).then(() => true);
+
+  const timecardId = interaction.values[0];
+  const timecard = await getTimecardById(interaction.guildId, timecardId);
+  if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', ephemeral: true }).then(() => true);
+
+  await interaction.showModal(buildCorrectionModal(timecard.timecard_id));
+  return true;
+}
+
 async function handleLoa(interaction) {
   const loaConfig = serverConfig?.duty?.loa || {};
   if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', ephemeral: true });
@@ -281,6 +353,7 @@ async function handleLoaSync(interaction) {
 }
 
 async function handleModalSubmit(interaction) {
+  if (interaction.customId.startsWith('duty_correction_modal:')) return handleCorrectionModalSubmit(interaction);
   if (interaction.customId !== 'duty_loa_request') return false;
   if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
   const loaConfig = serverConfig?.duty?.loa || {};
@@ -315,6 +388,7 @@ async function handleModalSubmit(interaction) {
 }
 
 async function handleButton(interaction) {
+  if (interaction.customId.startsWith('duty_correction_approve:') || interaction.customId.startsWith('duty_correction_deny:')) return handleCorrectionButton(interaction);
   if (!interaction.customId.startsWith('duty_loa_approve:') && !interaction.customId.startsWith('duty_loa_deny:')) return false;
   const [action, loaId] = interaction.customId.split(':');
   const loaConfig = serverConfig?.duty?.loa || {};
@@ -357,6 +431,143 @@ async function handleButton(interaction) {
   // TODO: Officer management promotion/demotion/termination blocking should check active approved LOAs in a future integration.
   await interaction.editReply(`${approved ? 'Approved' : 'Denied'} ${loa.loa_id}. ${roleMessage}`);
   return true;
+}
+
+
+async function handleCorrectionModalSubmit(interaction) {
+  const [, timecardId] = interaction.customId.split(':');
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  const correctionConfig = serverConfig?.duty?.corrections || {};
+  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', ephemeral: true }).then(() => true);
+  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', ephemeral: true }).then(() => true);
+
+  const requestedClockInAt = parseDateTimeInput(interaction.fields.getTextInputValue('correct_clock_in').trim());
+  const requestedClockOutAt = parseDateTimeInput(interaction.fields.getTextInputValue('correct_clock_out').trim());
+  const reason = interaction.fields.getTextInputValue('reason').trim();
+  const notes = interaction.fields.getTextInputValue('notes')?.trim() || '';
+
+  if (!requestedClockInAt) return interaction.reply({ content: 'Correct clock-in time must be valid and use YYYY-MM-DD HH:mm.', ephemeral: true }).then(() => true);
+  if (!requestedClockOutAt) return interaction.reply({ content: 'Correct clock-out time must be valid and use YYYY-MM-DD HH:mm.', ephemeral: true }).then(() => true);
+  const requestedDurationSeconds = calculateDurationSeconds(requestedClockInAt, requestedClockOutAt);
+  if (requestedDurationSeconds <= 0) return interaction.reply({ content: 'Correct clock-out time must be after the corrected clock-in time.', ephemeral: true }).then(() => true);
+  if (!reason) return interaction.reply({ content: 'Reason is required.', ephemeral: true }).then(() => true);
+
+  await ensureDutyTables();
+  const timecard = await getTimecardById(interaction.guildId, timecardId);
+  if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', ephemeral: true }).then(() => true);
+
+  const correction = await createTimecardCorrection({
+    guildId: interaction.guildId,
+    userId: interaction.user.id,
+    timecardId: timecard.timecard_id,
+    originalClockInAt: timecard.clock_in_at,
+    originalClockOutAt: timecard.clock_out_at,
+    originalDurationSeconds: timecard.duration_seconds,
+    requestedClockInAt,
+    requestedClockOutAt,
+    requestedDurationSeconds,
+    reason,
+    notes
+  });
+
+  const approvalChannel = await interaction.guild.channels.fetch(correctionConfig.approvalChannelId).catch(() => null);
+  if (!approvalChannel || typeof approvalChannel.send !== 'function') return interaction.reply({ content: 'The configured timecard correction approval channel could not be found.', ephemeral: true }).then(() => true);
+
+  const message = await approvalChannel.send({ embeds: [buildCorrectionEmbed(correction, 'Pending')], components: [buildCorrectionButtons(correction.correction_id, false)] });
+  await updateCorrectionApprovalMessage({ correctionId: correction.correction_id, channelId: message.channel.id, messageId: message.id });
+  await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Timecard correction submitted', fields: correctionLogFields(correction, interaction.user.id) });
+  // TODO: Send approved timecard corrections to a future Google handoff integration after that feature is designed.
+  await interaction.reply({ content: `Your timecard correction request has been submitted for staff approval. Correction ID: ${correction.correction_id}`, ephemeral: true });
+  return true;
+}
+
+async function handleCorrectionButton(interaction) {
+  const [action, correctionId] = interaction.customId.split(':');
+  const correctionConfig = serverConfig?.duty?.corrections || {};
+  const approverRoleIds = correctionConfig.approverRoleIds || [];
+  if (!approverRoleIds.length) return interaction.reply({ content: 'Timecard correction approver roles are not configured.', ephemeral: true }).then(() => true);
+  if (!memberHasAnyRole(interaction.member, approverRoleIds)) {
+    await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Timecard correction permission failure', fields: [{ name: 'Correction ID', value: correctionId, inline: true }, { name: 'Staff member', value: `<@${interaction.user.id}>`, inline: true }] });
+    return interaction.reply({ content: 'You do not have permission to review timecard corrections.', ephemeral: true }).then(() => true);
+  }
+  // TODO: Replace button-only review with a notes modal for approval/denial review notes.
+
+  await interaction.deferReply({ ephemeral: true });
+  const existing = await getCorrectionById(correctionId);
+  if (!existing) { await interaction.editReply('That timecard correction request could not be found.'); return true; }
+  if (existing.status !== 'pending') { await interaction.editReply(`That timecard correction request is already ${existing.status}.`); return true; }
+
+  const approved = action === 'duty_correction_approve';
+  let correction = approved
+    ? await approveTimecardCorrection({ correctionId, reviewedBy: interaction.user.id })
+    : await denyTimecardCorrection({ correctionId, reviewedBy: interaction.user.id });
+
+  if (approved) correction = await applyApprovedTimecardCorrection(correctionId);
+
+  await notifyCorrectionUser(interaction.client, correction, approved);
+  await interaction.message.edit({ embeds: [buildCorrectionEmbed(correction, approved ? 'Approved' : 'Denied')], components: [buildCorrectionButtons(correction.correction_id, true)] }).catch(() => null);
+  await sendDutyLog({ guild: interaction.guild, serverConfig, title: approved ? 'Timecard correction approved' : 'Timecard correction denied', fields: correctionLogFields(correction, interaction.user.id) });
+  await interaction.editReply(`${approved ? 'Approved' : 'Denied'} ${correction.correction_id}.`);
+  return true;
+}
+
+function buildCorrectionModal(timecardId) {
+  return new ModalBuilder().setCustomId(`duty_correction_modal:${timecardId}`).setTitle('Timecard Correction').addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('correct_clock_in').setLabel('Correct clock-in (YYYY-MM-DD HH:mm)').setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('correct_clock_out').setLabel('Correct clock-out (YYYY-MM-DD HH:mm)').setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Reason for correction').setStyle(TextInputStyle.Paragraph).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Additional notes').setStyle(TextInputStyle.Paragraph).setRequired(false))
+  );
+}
+
+function buildCorrectionEmbed(correction, status) {
+  return new EmbedBuilder().setTitle(`Timecard Correction - ${status}`).setColor(status === 'Approved' ? DUTY_EMBED_COLOR : status === 'Denied' ? ERROR_EMBED_COLOR : 0xf1c40f).addFields([
+    { name: 'Officer', value: `<@${correction.user_id}>`, inline: true },
+    { name: 'Correction ID', value: correction.correction_id, inline: true },
+    { name: 'Timecard ID', value: correction.timecard_id, inline: true },
+    { name: 'Original clock-in', value: formatDateTimeForDisplay(correction.original_clock_in_at), inline: true },
+    { name: 'Original clock-out', value: formatDateTimeForDisplay(correction.original_clock_out_at), inline: true },
+    { name: 'Original duration', value: formatDuration(correction.original_duration_seconds), inline: true },
+    { name: 'Requested clock-in', value: formatDateTimeForDisplay(correction.requested_clock_in_at), inline: true },
+    { name: 'Requested clock-out', value: formatDateTimeForDisplay(correction.requested_clock_out_at), inline: true },
+    { name: 'Requested duration', value: formatDuration(correction.requested_duration_seconds), inline: true },
+    { name: 'Status', value: status, inline: true },
+    { name: 'Reason', value: truncateField(correction.reason), inline: false },
+    { name: 'Notes', value: truncateField(correction.notes || 'None'), inline: false }
+  ]).setTimestamp(new Date());
+}
+
+function buildCorrectionButtons(correctionId, disabled) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`duty_correction_approve:${correctionId}`).setLabel('Approve').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(`duty_correction_deny:${correctionId}`).setLabel('Deny').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+  );
+}
+
+function correctionLogFields(correction, staffUserId) {
+  return [
+    { name: 'Correction ID', value: correction.correction_id, inline: true },
+    { name: 'Timecard ID', value: correction.timecard_id, inline: true },
+    { name: 'Officer', value: `<@${correction.user_id}>`, inline: true },
+    { name: 'Staff/trigger', value: staffUserId ? `<@${staffUserId}>` : 'System', inline: true },
+    { name: 'Original', value: `${formatDateTimeForDisplay(correction.original_clock_in_at)} to ${formatDateTimeForDisplay(correction.original_clock_out_at)} (${formatDuration(correction.original_duration_seconds)})`, inline: false },
+    { name: 'Requested', value: `${formatDateTimeForDisplay(correction.requested_clock_in_at)} to ${formatDateTimeForDisplay(correction.requested_clock_out_at)} (${formatDuration(correction.requested_duration_seconds)})`, inline: false },
+    { name: 'Status', value: correction.status || 'pending', inline: true }
+  ];
+}
+
+async function notifyCorrectionUser(client, correction, approved) {
+  const user = await client.users.fetch(correction.user_id).catch(() => null);
+  if (!user) return false;
+  const content = approved
+    ? `Your timecard correction request has been approved.\n\nCorrection ID: ${correction.correction_id}\nTimecard ID: ${correction.timecard_id}\nOriginal: ${formatDateTimeForDisplay(correction.original_clock_in_at)} to ${formatDateTimeForDisplay(correction.original_clock_out_at)}\nNew: ${formatDateTimeForDisplay(correction.requested_clock_in_at)} to ${formatDateTimeForDisplay(correction.requested_clock_out_at)}\nNew duration: ${formatDuration(correction.requested_duration_seconds)}`
+    : `Your timecard correction request has been denied.\n\nCorrection ID: ${correction.correction_id}\nTimecard ID: ${correction.timecard_id}\n\nPlease contact Command Staff with questions.`;
+  return user.send({ content }).then(() => true).catch(() => false);
+}
+
+function formatDateTimeForDisplay(value) {
+  const unix = toUnix(value);
+  return Number.isFinite(unix) ? `<t:${unix}:f>` : String(value || 'Unknown');
 }
 
 function buildLoaEmbed(loa, status, exceptionRequired) {

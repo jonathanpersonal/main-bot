@@ -116,11 +116,104 @@ async function getRecentTimecards(guildId, userId, limit = 10) {
 
   return query(
     `SELECT * FROM duty_timecards
-     WHERE guild_id = ? AND user_id = ?
+     WHERE guild_id = ? AND user_id = ? AND status = 'completed'
      ORDER BY clock_out_at DESC
      LIMIT ${safeLimit}`,
     [guildId, userId]
   );
+}
+
+
+function createCorrectionId() {
+  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `COR-${datePart}-${randomPart}`;
+}
+
+async function getTimecardById(guildId, timecardId) {
+  const rows = await query(
+    "SELECT * FROM duty_timecards WHERE guild_id = ? AND timecard_id = ? AND status = 'completed' LIMIT 1",
+    [guildId, timecardId]
+  );
+  return rows[0] || null;
+}
+
+async function createTimecardCorrection({ guildId, userId, timecardId, originalClockInAt, originalClockOutAt, originalDurationSeconds, requestedClockInAt, requestedClockOutAt, requestedDurationSeconds, reason, notes }) {
+  let lastError;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const correctionId = createCorrectionId();
+    try {
+      await query(
+        `INSERT INTO duty_timecard_corrections
+          (correction_id, guild_id, user_id, timecard_id, original_clock_in_at, original_clock_out_at, original_duration_seconds, requested_clock_in_at, requested_clock_out_at, requested_duration_seconds, reason, notes, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [correctionId, guildId, userId, timecardId, toMysqlDateTime(new Date(originalClockInAt)), toMysqlDateTime(new Date(originalClockOutAt)), originalDurationSeconds, toMysqlDateTime(requestedClockInAt), toMysqlDateTime(requestedClockOutAt), requestedDurationSeconds, reason, notes || null]
+      );
+      return getCorrectionById(correctionId);
+    } catch (error) {
+      lastError = error;
+      if (error.code !== 'ER_DUP_ENTRY') throw error;
+    }
+  }
+  throw lastError;
+}
+
+async function getCorrectionById(correctionId) {
+  const rows = await query('SELECT * FROM duty_timecard_corrections WHERE correction_id = ? LIMIT 1', [correctionId]);
+  return rows[0] || null;
+}
+
+async function updateCorrectionApprovalMessage({ correctionId, channelId, messageId }) {
+  await query('UPDATE duty_timecard_corrections SET approval_channel_id = ?, approval_message_id = ? WHERE correction_id = ?', [channelId, messageId, correctionId]);
+}
+
+async function approveTimecardCorrection({ correctionId, reviewedBy, reviewNotes }) {
+  await query("UPDATE duty_timecard_corrections SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_notes = ? WHERE correction_id = ?", [reviewedBy, reviewNotes || null, correctionId]);
+  return getCorrectionById(correctionId);
+}
+
+async function denyTimecardCorrection({ correctionId, reviewedBy, reviewNotes }) {
+  await query("UPDATE duty_timecard_corrections SET status = 'denied', reviewed_by = ?, reviewed_at = NOW(), review_notes = ? WHERE correction_id = ?", [reviewedBy, reviewNotes || null, correctionId]);
+  return getCorrectionById(correctionId);
+}
+
+async function applyApprovedTimecardCorrection(correctionId) {
+  const correction = await getCorrectionById(correctionId);
+  if (!correction || correction.status !== 'approved') return correction;
+
+  await query(
+    `UPDATE duty_timecards
+     SET clock_in_at = ?, clock_out_at = ?, duration_seconds = ?, updated_at = NOW()
+     WHERE guild_id = ? AND timecard_id = ? AND user_id = ?`,
+    [
+      toMysqlDateTime(new Date(correction.requested_clock_in_at)),
+      toMysqlDateTime(new Date(correction.requested_clock_out_at)),
+      correction.requested_duration_seconds,
+      correction.guild_id,
+      correction.timecard_id,
+      correction.user_id
+    ]
+  );
+
+  return getCorrectionById(correctionId);
+}
+
+function parseDateTimeInput(value) {
+  const text = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) return null;
+  const [datePart, timePart] = text.split(' ');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute] = timePart.split(':').map(Number);
+  const date = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day || date.getHours() !== hour || date.getMinutes() !== minute) return null;
+  return date;
+}
+
+function calculateDurationSeconds(clockInAt, clockOutAt) {
+  const start = clockInAt instanceof Date ? clockInAt : new Date(clockInAt);
+  const end = clockOutAt instanceof Date ? clockOutAt : new Date(clockOutAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return Math.floor((end.getTime() - start.getTime()) / 1000);
 }
 
 function createLoaId() {
@@ -230,6 +323,7 @@ module.exports = {
   clockOutUser,
   createTimecardId,
   createLoaId,
+  createCorrectionId,
   createLoaRequest,
   getLoaRequestById,
   updateLoaApprovalMessage,
@@ -244,5 +338,14 @@ module.exports = {
   parseDateInput,
   formatDateOnly,
   formatDuration,
-  getRecentTimecards
+  getRecentTimecards,
+  getTimecardById,
+  createTimecardCorrection,
+  getCorrectionById,
+  updateCorrectionApprovalMessage,
+  approveTimecardCorrection,
+  denyTimecardCorrection,
+  applyApprovedTimecardCorrection,
+  parseDateTimeInput,
+  calculateDurationSeconds
 };

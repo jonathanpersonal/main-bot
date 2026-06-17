@@ -458,8 +458,13 @@ Internal Affairs Team`
     },
 
     corrections: {
-      enabled: false,
-      approvalChannelId: ''
+      enabled: true,
+
+      approvalChannelId: '',
+      approverRoleIds: [],
+
+      allowManualTimecardId: true,
+      recentTimecardLimit: 10
     },
 
     activity: {

@@ -118,8 +118,39 @@ async function ensureDutyTables() {
 
   await ensureDutyLoaColumns();
 
-  // TODO: Future Duty phases may add duty_timecard_corrections,
-  // duty_activity_cycles, and duty_activity_findings tables.
+  await query(`
+    CREATE TABLE IF NOT EXISTS duty_timecard_corrections (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      correction_id VARCHAR(64) NOT NULL UNIQUE,
+      guild_id VARCHAR(32) NOT NULL,
+      user_id VARCHAR(32) NOT NULL,
+      timecard_id VARCHAR(64) NOT NULL,
+      original_clock_in_at DATETIME NOT NULL,
+      original_clock_out_at DATETIME NOT NULL,
+      original_duration_seconds INT NOT NULL,
+      requested_clock_in_at DATETIME NOT NULL,
+      requested_clock_out_at DATETIME NOT NULL,
+      requested_duration_seconds INT NOT NULL,
+      reason TEXT NOT NULL,
+      notes TEXT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'pending',
+      requested_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reviewed_at DATETIME NULL,
+      reviewed_by VARCHAR(32) NULL,
+      review_notes TEXT NULL,
+      approval_message_id VARCHAR(32) NULL,
+      approval_channel_id VARCHAR(32) NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_correction_guild_user_created (guild_id, user_id, created_at),
+      INDEX idx_correction_status (guild_id, status),
+      INDEX idx_correction_timecard (guild_id, timecard_id)
+    )
+  `);
+
+  await ensureDutyTimecardCorrectionColumns();
+
+  // TODO: Future Duty phases may add duty_activity_cycles and duty_activity_findings tables.
 
 }
 
@@ -136,8 +167,8 @@ async function ensureDutyLoaColumns() {
     last_sync_at: 'DATETIME NULL',
     last_sync_status: 'VARCHAR(64) NULL',
     last_sync_error: 'TEXT NULL',
-    created_at: 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
-    updated_at: 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    created_at: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP',
+    updated_at: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
   };
 
   const existingColumns = await query('SHOW COLUMNS FROM duty_loa_requests');
@@ -146,6 +177,42 @@ async function ensureDutyLoaColumns() {
   for (const [columnName, definition] of Object.entries(columnDefinitions)) {
     if (!existingColumnNames.has(columnName)) {
       await query(`ALTER TABLE duty_loa_requests ADD COLUMN ${columnName} ${definition}`);
+    }
+  }
+}
+
+
+async function ensureDutyTimecardCorrectionColumns() {
+  const columnDefinitions = {
+    correction_id: 'VARCHAR(64) NULL UNIQUE',
+    guild_id: 'VARCHAR(32) NULL',
+    user_id: 'VARCHAR(32) NULL',
+    timecard_id: 'VARCHAR(64) NULL',
+    original_clock_in_at: 'DATETIME NULL',
+    original_clock_out_at: 'DATETIME NULL',
+    original_duration_seconds: 'INT NULL',
+    requested_clock_in_at: 'DATETIME NULL',
+    requested_clock_out_at: 'DATETIME NULL',
+    requested_duration_seconds: 'INT NULL',
+    reason: 'TEXT NULL',
+    notes: 'TEXT NULL',
+    status: "VARCHAR(32) NOT NULL DEFAULT 'pending'",
+    requested_at: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP',
+    reviewed_at: 'DATETIME NULL',
+    reviewed_by: 'VARCHAR(32) NULL',
+    review_notes: 'TEXT NULL',
+    approval_message_id: 'VARCHAR(32) NULL',
+    approval_channel_id: 'VARCHAR(32) NULL',
+    created_at: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP',
+    updated_at: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+  };
+
+  const existingColumns = await query('SHOW COLUMNS FROM duty_timecard_corrections');
+  const existingColumnNames = new Set(existingColumns.map((column) => column.Field));
+
+  for (const [columnName, definition] of Object.entries(columnDefinitions)) {
+    if (!existingColumnNames.has(columnName)) {
+      await query(`ALTER TABLE duty_timecard_corrections ADD COLUMN ${columnName} ${definition}`);
     }
   }
 }
