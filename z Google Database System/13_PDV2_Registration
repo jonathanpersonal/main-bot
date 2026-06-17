@@ -1,7 +1,131 @@
 /*************************************************************
  * Department Database v2
- * File: 07_PDV2_BotRequests
+ * File: 13_PDV2_Registration
+ * -----------------------------------------------------------
+ * Registration workflow processor for REGISTER_OFFICER bot
+ * requests. This upserts the main Database sheet by Discord ID.
+ *
+ * This file also includes hard-route overrides for submit/process
+ * so REGISTER_OFFICER cannot fall through to GENERIC_REQUEST_RECEIVED
+ * if an older processor file is still present in the project.
  *************************************************************/
+
+function pdv2RegisterOfficerFromBotRequest_(requestId, data) {
+  data = data || {};
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+
+  pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_PROCESSOR_START', 'REGISTER_OFFICER processor started.', {
+    hasPayload: !!payload,
+    payloadKeys: Object.keys(payload || {}).sort()
+  });
+
+  var source = pdv2Pick_(data, ['source'], 'DISCORD_BOT');
+  var submittedBy = pdv2String_(pdv2Pick_(data, ['submittedByDiscordId', 'actorDiscordId'], ''));
+
+  var discordId = pdv2String_(
+    pdv2Pick_(payload, ['discordUserId', 'discordId', 'targetDiscordId'], '') ||
+    pdv2Pick_(data, ['targetDiscordId', 'discordUserId', 'discordId'], '')
+  );
+
+  if (!discordId) {
+    return pdv2Fail_('REGISTER_OFFICER is missing Discord ID.');
+  }
+
+  var cleanDisplayName = pdv2String_(
+    pdv2Pick_(payload, ['cleanDisplayName', 'targetName', 'name', 'displayName'], '') ||
+    pdv2Pick_(data, ['targetName', 'name', 'displayName'], '')
+  );
+
+  var discordUsername = pdv2String_(
+    pdv2Pick_(payload, ['discordUsername', 'username'], '') ||
+    pdv2Pick_(data, ['targetDiscordTag', 'discordUsername', 'username'], '')
+  );
+
+  var rankName = pdv2String_(
+    pdv2Pick_(payload, ['rankName', 'rank', 'currentRank'], '') ||
+    pdv2Pick_(data, ['newRank', 'rank'], '')
+  );
+
+  var joinDate = pdv2String_(pdv2Pick_(payload, ['joinDate', 'hireDate'], ''));
+  var steam64 = pdv2String_(pdv2Pick_(payload, ['steam64', 'steamId'], ''));
+  var email = pdv2String_(pdv2Pick_(payload, ['email'], ''));
+  var department = pdv2String_(
+    pdv2Pick_(payload, ['department', 'departmentKey'], '') ||
+    pdv2Pick_(data, ['departmentKey'], '') ||
+    pdv2GetConfigValue_('DEFAULT_DEPARTMENT_KEY', 'main')
+  );
+  var precinct = pdv2String_(pdv2Pick_(payload, ['precinct'], ''));
+  var registerMode = pdv2String_(pdv2Pick_(payload, ['registerMode'], 'UNKNOWN'));
+
+  var upsertResult = pdv2UpsertDatabaseRecord_({
+    status: 'Active',
+    name: cleanDisplayName,
+    username: discordUsername,
+    discordId: discordId,
+    rank: rankName,
+    steam64: steam64,
+    joinDate: joinDate,
+    email: email,
+    precinct: precinct,
+    department: department,
+    notes: 'Registered from Discord bot. Mode: ' + registerMode
+  }, {
+    source: source,
+    actor: submittedBy,
+    requestId: requestId
+  });
+
+  if (!upsertResult.ok) {
+    return upsertResult;
+  }
+
+  pdv2Audit_(
+    source,
+    'REGISTER_OFFICER',
+    submittedBy,
+    'Database',
+    discordId,
+    requestId,
+    {
+      registerMode: registerMode,
+      cleanDisplayName: cleanDisplayName,
+      rankName: rankName,
+      joinDate: joinDate,
+      steam64Provided: !!steam64,
+      emailProvided: !!email,
+      upsertMode: upsertResult.mode,
+      rowNumber: upsertResult.rowNumber
+    }
+  );
+
+  var botAction = pdv2CreateBotAction_({
+    requestId: requestId,
+    actionType: 'REGISTER_OFFICER_RESULT',
+    targetDiscordId: discordId,
+    payload: {
+      message: 'Officer registration saved to Google Database.',
+      requestId: requestId,
+      discordId: discordId,
+      name: cleanDisplayName,
+      rank: rankName,
+      mode: upsertResult.mode,
+      rowNumber: upsertResult.rowNumber
+    }
+  });
+
+  pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_PROCESSOR_DONE', 'REGISTER_OFFICER processor completed.', {
+    discordId: discordId,
+    mode: upsertResult.mode,
+    rowNumber: upsertResult.rowNumber
+  });
+
+  return pdv2Success_({
+    message: 'Officer registration saved to Database.',
+    registerMode: registerMode,
+    upsert: upsertResult,
+    createdAction: botAction
+  });
+}
 
 function pdv2SubmitBotRequest_(data) {
   return pdv2WithLock_(function() {
@@ -51,16 +175,11 @@ function pdv2SubmitBotRequest_(data) {
 
     var processResult;
     if (actionType === 'REGISTER_OFFICER') {
-      pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_DIRECT_ROUTE_HIT', 'REGISTER_OFFICER direct route hit inside pdv2SubmitBotRequest_.', {
+      pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_DIRECT_ROUTE_HIT', 'REGISTER_OFFICER direct route hit from 13_PDV2_Registration override.', {
         targetDiscordId: targetDiscordId,
         hasProcessor: typeof pdv2RegisterOfficerFromBotRequest_ === 'function'
       });
-
-      if (typeof pdv2RegisterOfficerFromBotRequest_ !== 'function') {
-        processResult = pdv2Fail_('REGISTER_OFFICER processor is not installed. Add 13_PDV2_Registration and deploy a new web app version.');
-      } else {
-        processResult = pdv2RegisterOfficerFromBotRequest_(requestId, data);
-      }
+      processResult = pdv2RegisterOfficerFromBotRequest_(requestId, data);
     } else {
       processResult = pdv2ProcessBotRequest_(requestId, actionType, data);
     }
@@ -98,6 +217,14 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
       return pdv2Fail_('Bot request is missing actionType.');
     }
 
+    if (actionType === 'REGISTER_OFFICER') {
+      pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_ROUTE_HIT', 'REGISTER_OFFICER processor route hit from 13_PDV2_Registration override.', {
+        targetDiscordId: targetDiscordId,
+        hasProcessor: typeof pdv2RegisterOfficerFromBotRequest_ === 'function'
+      });
+      return pdv2RegisterOfficerFromBotRequest_(requestId, data);
+    }
+
     if (actionType === 'GOOGLE_TEST' || actionType === 'TEST' || actionType === 'TEST_GOOGLE_POST') {
       var testAction = pdv2CreateBotAction_({
         requestId: requestId,
@@ -110,24 +237,7 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
           instanceMode: PDV2.INSTANCE_MODE
         }
       });
-
-      return pdv2Success_({
-        message: 'Test request received and pending bot action created.',
-        createdAction: testAction
-      });
-    }
-
-    if (actionType === 'REGISTER_OFFICER') {
-      pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_ROUTE_HIT', 'REGISTER_OFFICER processor route hit inside pdv2ProcessBotRequest_.', {
-        targetDiscordId: targetDiscordId,
-        hasProcessor: typeof pdv2RegisterOfficerFromBotRequest_ === 'function'
-      });
-
-      if (typeof pdv2RegisterOfficerFromBotRequest_ !== 'function') {
-        return pdv2Fail_('REGISTER_OFFICER processor is not installed. Add 13_PDV2_Registration and deploy a new web app version.');
-      }
-
-      return pdv2RegisterOfficerFromBotRequest_(requestId, data);
+      return pdv2Success_({ message: 'Test request received and pending bot action created.', createdAction: testAction });
     }
 
     if (actionType === 'PROMOTE' || actionType === 'DEMOTE' || actionType === 'SET_RANK') {
@@ -136,24 +246,17 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
         actor: actor,
         requestId: requestId
       });
-
       pdv2CreateBotAction_({
         requestId: requestId,
         actionType: 'OFFICER_MANAGEMENT_RESULT',
         targetDiscordId: targetDiscordId,
-        payload: {
-          actionType: actionType,
-          requestId: requestId,
-          result: rankResult
-        }
+        payload: { actionType: actionType, requestId: requestId, result: rankResult }
       });
-
       return rankResult;
     }
 
     if (actionType === 'TERMINATION' || actionType === 'RESIGNATION') {
       var statusValue = actionType === 'TERMINATION' ? 'Terminated' : 'Resigned';
-
       var statusResult = pdv2SetDatabaseStatus_(Object.assign({}, data, {
         status: statusValue,
         clearRank: true
@@ -162,64 +265,35 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
         actor: actor,
         requestId: requestId
       });
-
-      pdv2AppendDisciplineRecord_(Object.assign({}, data, {
-        actionType: actionType
-      }), requestId);
-
+      pdv2AppendDisciplineRecord_(Object.assign({}, data, { actionType: actionType }), requestId);
       pdv2CreateBotAction_({
         requestId: requestId,
         actionType: 'OFFICER_STATUS_RESULT',
         targetDiscordId: targetDiscordId,
-        payload: {
-          actionType: actionType,
-          requestId: requestId,
-          result: statusResult
-        }
+        payload: { actionType: actionType, requestId: requestId, result: statusResult }
       });
-
       return statusResult;
     }
 
     if (actionType === 'COACHING' || actionType === 'STRIKE') {
-      var disciplineResult = pdv2AppendDisciplineRecord_(Object.assign({}, data, {
-        actionType: actionType
-      }), requestId);
-
+      var disciplineResult = pdv2AppendDisciplineRecord_(Object.assign({}, data, { actionType: actionType }), requestId);
       pdv2CreateBotAction_({
         requestId: requestId,
         actionType: 'DISCIPLINE_RECORD_RESULT',
         targetDiscordId: targetDiscordId,
-        payload: {
-          actionType: actionType,
-          requestId: requestId,
-          result: disciplineResult
-        }
+        payload: { actionType: actionType, requestId: requestId, result: disciplineResult }
       });
-
       return disciplineResult;
     }
 
-    if (
-      actionType === 'TRAINING_COMPLETE' ||
-      actionType === 'APPLICATION_REVIEW' ||
-      actionType === 'CADET_TRAINING'
-    ) {
-      var trainingResult = pdv2AppendTrainingRecord_(Object.assign({}, data, {
-        actionType: actionType
-      }), requestId);
-
+    if (actionType === 'TRAINING_COMPLETE' || actionType === 'APPLICATION_REVIEW' || actionType === 'CADET_TRAINING') {
+      var trainingResult = pdv2AppendTrainingRecord_(Object.assign({}, data, { actionType: actionType }), requestId);
       pdv2CreateBotAction_({
         requestId: requestId,
         actionType: 'TRAINING_RECORD_RESULT',
         targetDiscordId: targetDiscordId,
-        payload: {
-          actionType: actionType,
-          requestId: requestId,
-          result: trainingResult
-        }
+        payload: { actionType: actionType, requestId: requestId, result: trainingResult }
       });
-
       return trainingResult;
     }
 
@@ -233,26 +307,12 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
         requestId: requestId
       }
     });
-
-    return pdv2Success_({
-      message: 'Request stored. No specific processor exists yet for ' + actionType + '.'
-    });
+    return pdv2Success_({ message: 'Request stored. No specific processor exists yet for ' + actionType + '.' });
   } catch (err) {
     pdv2Log_('ERROR', requestId, 'BOT_REQUEST_PROCESS_FAILED', String(err), {
       actionType: actionType,
       stack: err && err.stack ? String(err.stack) : ''
     });
-
     return pdv2Fail_(String(err));
   }
-}
-
-function pdv2GetRequestStatus_(requestId) {
-  var row = pdv2FindRowByValue_(PDV2.SHEETS.BOT_REQUESTS, 'Request ID', requestId);
-  if (!row) return pdv2Fail_('Request not found.', { requestId: requestId });
-  var record = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.BOT_REQUESTS), row);
-  var actions = pdv2ListRows_(PDV2.SHEETS.BOT_ACTIONS).filter(function(action) {
-    return pdv2String_(action['Request ID']) === pdv2String_(requestId);
-  });
-  return pdv2Success_({ request: record, actions: actions });
 }
