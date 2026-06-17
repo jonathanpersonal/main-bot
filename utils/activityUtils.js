@@ -50,22 +50,61 @@ function getMostRecentCompletedCycle(cycleLengthDays = 14) {
   return { cycleStart: start, cycleEnd: end };
 }
 
-async function getDepartmentMembersForActivity(guild, config) {
-  await guild.members.fetch();
+async function getDepartmentMembersForActivity(guild, config, deadline = Date.now() + 10000) {
   const activityConfig = config?.duty?.activity || {};
   const includeRoleIds = activityConfig.includeRoleIds || [];
   const excludeRoleIds = activityConfig.excludeRoleIds || [];
+  const membersById = new Map();
 
-  return guild.members.cache.filter((member) => {
+  if (!includeRoleIds.length) {
+    throw new Error('Activity includeRoleIds is not configured. Add a department/test role before running the report.');
+  }
+
+  for (const roleId of includeRoleIds) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      console.warn('[activity-report] member loading timed out before all include roles were checked');
+      break;
+    }
+
+    const role = await withActivityTimeout(
+      guild.roles.fetch(roleId),
+      remainingMs,
+      `Include role ${roleId} fetch timed out.`
+    ).catch((error) => {
+      console.warn(`[activity-report] include role ${roleId} could not be fetched:`, error.message || error);
+      return null;
+    });
+    if (!role) continue;
+
+    for (const member of role.members.values()) {
+      membersById.set(member.id, member);
+    }
+  }
+
+  return Array.from(membersById.values()).filter((member) => {
     if (member.user.bot) return false;
     const roleIds = member.roles.cache.map((role) => role.id);
     if (excludeRoleIds.some((roleId) => roleIds.includes(roleId))) return false;
-    if (includeRoleIds.length > 0) return includeRoleIds.some((roleId) => roleIds.includes(roleId));
-    return Boolean(getMemberRank(member, config));
+    return includeRoleIds.some((roleId) => roleIds.includes(roleId));
   });
 }
 
+function withActivityTimeout(promise, timeoutMs, message) {
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      const error = new Error(message);
+      error.code = 'ACTIVITY_TIMEOUT';
+      reject(error);
+    }, Math.max(1, timeoutMs));
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+}
+
 function getRankRequirementForMember(member, config) {
+  if (!member) return { rank: null, requirement: null };
   const rank = getMemberRank(member, config);
   if (!rank) return { rank: null, requirement: null };
   const requirements = config?.duty?.activity?.rankRequirements || [];
@@ -248,21 +287,84 @@ function applyDisciplinePolicy(finding, { config, dryRun }) {
   return finding;
 }
 
-async function generateActivityReport({ guild, cycleStart, cycleEnd, dryRun = true, triggeredBy, config }) {
-  const cycleId = createActivityCycleId(cycleStart, cycleEnd);
-  const members = await getDepartmentMembersForActivity(guild, config);
-  const findings = [];
+function createErrorFinding({ guildId, userId, cycleId, message }) {
+  return {
+    ...buildFindingBase({
+      guildId,
+      userId,
+      rank: null,
+      requirement: null,
+      status: 'ERROR',
+      promotionEligible: false,
+      exemptReason: 'Officer calculation failed.',
+      notes: message ? `Skipped because calculation failed: ${message}` : 'Skipped because calculation failed.'
+    }),
+    cycleId,
+    findingId: createActivityFindingId()
+  };
+}
 
-  for (const member of members.values()) {
-    let finding = await calculateOfficerActivity({ guild, guildId: guild.id, userId: member.id, cycleStart, cycleEnd, config });
-    if (finding.activityStatus === 'INACTIVE') finding.inactiveStreak = (await calculateInactiveStreak(guild.id, member.id)) + 1;
-    finding = applyDisciplinePolicy(finding, { config, dryRun });
-    finding.cycleId = cycleId;
-    finding.findingId = createActivityFindingId();
-    if (finding.autoStrikeCreated) finding.autoStrikeReference = finding.findingId;
-    await saveActivityFinding(finding);
-    findings.push(finding);
+async function generateActivityReport({ guild, cycleStart, cycleEnd, dryRun = true, triggeredBy, config, timeoutMs = 25000 }) {
+  const startedAt = Date.now();
+  const deadline = startedAt + Math.max(1000, Number(timeoutMs) || 25000);
+  const cycleId = createActivityCycleId(cycleStart, cycleEnd);
+  const members = await getDepartmentMembersForActivity(guild, config, deadline);
+  console.log('[activity-report] department members loaded', { count: members.length });
+  const findings = [];
+  let timedOut = false;
+
+  console.log('[activity-report] officer calculations started');
+  for (const member of members) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      timedOut = true;
+      console.warn('[activity-report] safety timeout reached before all officers were processed');
+      break;
+    }
+
+    try {
+      let finding = await withActivityTimeout(
+        calculateOfficerActivity({ guild, guildId: guild.id, userId: member.id, cycleStart, cycleEnd, config }),
+        remainingMs,
+        `Officer calculation timed out for ${member.id}.`
+      );
+      if (finding.activityStatus === 'INACTIVE') {
+        const streakRemainingMs = deadline - Date.now();
+        if (streakRemainingMs <= 0) {
+          const timeoutError = new Error(`Inactive streak lookup timed out for ${member.id}.`);
+          timeoutError.code = 'ACTIVITY_TIMEOUT';
+          throw timeoutError;
+        }
+        finding.inactiveStreak = (await withActivityTimeout(
+          calculateInactiveStreak(guild.id, member.id),
+          streakRemainingMs,
+          `Inactive streak lookup timed out for ${member.id}.`
+        )) + 1;
+      }
+      finding = applyDisciplinePolicy(finding, { config, dryRun });
+      finding.cycleId = cycleId;
+      finding.findingId = createActivityFindingId();
+      if (finding.autoStrikeCreated) finding.autoStrikeReference = finding.findingId;
+      findings.push(finding);
+    } catch (error) {
+      console.error(`[activity-report] officer calculation failed for ${member.id}:`, error.message || error);
+      findings.push(createErrorFinding({
+        guildId: guild.id,
+        userId: member.id,
+        cycleId,
+        message: error.message || 'Unknown error'
+      }));
+      if (error.code === 'ACTIVITY_TIMEOUT') {
+        timedOut = true;
+        break;
+      }
+    }
   }
+  console.log('[activity-report] officer calculations completed', {
+    processed: findings.length,
+    loaded: members.length,
+    timedOut
+  });
 
   const summary = {
     cycleId,
@@ -272,6 +374,8 @@ async function generateActivityReport({ guild, cycleStart, cycleEnd, dryRun = tr
     dryRun,
     generatedBy: triggeredBy?.id,
     totalOfficers: findings.length,
+    loadedOfficerCount: members.length,
+    timedOut,
     activeCount: findings.filter((f) => f.activityStatus === 'ACTIVE').length,
     semiActiveCount: findings.filter((f) => f.activityStatus === 'SEMI_ACTIVE').length,
     inactiveCount: findings.filter((f) => f.activityStatus === 'INACTIVE').length,
@@ -281,14 +385,57 @@ async function generateActivityReport({ guild, cycleStart, cycleEnd, dryRun = tr
     errorCount: findings.filter((f) => f.activityStatus === 'ERROR').length
   };
 
-  await saveActivityCycle(summary);
+  console.log('[activity-report] database save started', { dryRun });
+  if (!dryRun) {
+    for (const finding of findings) {
+      const saveRemainingMs = deadline - Date.now();
+      if (saveRemainingMs <= 0) {
+        timedOut = true;
+        console.warn('[activity-report] safety timeout reached before all findings were saved');
+        break;
+      }
+      try {
+        await withActivityTimeout(
+          saveActivityFinding(finding),
+          saveRemainingMs,
+          `Activity finding save timed out for ${finding.userId}.`
+        );
+      } catch (error) {
+        console.error(`[activity-report] finding save failed for ${finding.userId}:`, error.message || error);
+        if (error.code === 'ACTIVITY_TIMEOUT') {
+          timedOut = true;
+          break;
+        }
+      }
+    }
+    const cycleSaveRemainingMs = deadline - Date.now();
+    if (cycleSaveRemainingMs > 0) {
+      try {
+        await withActivityTimeout(
+          saveActivityCycle(summary),
+          cycleSaveRemainingMs,
+          'Activity cycle save timed out.'
+        );
+      } catch (error) {
+        console.error('[activity-report] cycle save failed:', error.message || error);
+        if (error.code === 'ACTIVITY_TIMEOUT') timedOut = true;
+      }
+    } else {
+      timedOut = true;
+      console.warn('[activity-report] safety timeout reached before the cycle summary was saved');
+    }
+  }
+  summary.timedOut = timedOut;
+  console.log('[activity-report] database save completed', { dryRun, saved: !dryRun });
+
   return { cycle: summary, findings, embed: buildActivityReportEmbed({ summary, findings }) };
 }
 
 function buildActivityReportEmbed({ summary, findings }) {
   const detailFindings = findings.filter((f) => ['INACTIVE', 'SEMI_ACTIVE', 'ERROR'].includes(f.activityStatus)).slice(0, 20);
   const lines = detailFindings.map((f) => `• <@${f.userId}> — ${f.rankName || 'Unknown Rank'} — ${formatHours(f.totalSeconds)} / ${f.activeRequiredHours ?? 'N/A'}h — ${formatActivityStatus(f.activityStatus)} — Streak ${f.inactiveStreak || 0}${f.disciplineAction ? ` — ${f.disciplineAction}` : f.commandReviewRequired ? ' — Command review' : ''}`);
-  if (findings.length > detailFindings.length) lines.push(`More details are stored in the database. Showing first ${detailFindings.length} relevant findings.`);
+  if (findings.length > detailFindings.length) lines.push(`More details are ${summary.dryRun ? 'included in this dry-run calculation' : 'stored in the database'}. Showing first ${detailFindings.length} relevant findings.`);
+  if (summary.timedOut) lines.unshift('Safety timeout reached. This is a partial report.');
 
   return new EmbedBuilder()
     .setTitle('Duty Activity Cycle Report')
@@ -296,7 +443,7 @@ function buildActivityReportEmbed({ summary, findings }) {
     .addFields(
       { name: 'Cycle', value: `${formatDateOnly(summary.cycleStart)} through ${formatDateOnly(summary.cycleEnd)}`, inline: false },
       { name: 'Mode', value: summary.dryRun ? 'Dry run' : 'Live', inline: true },
-      { name: 'Checked', value: String(summary.totalOfficers), inline: true },
+      { name: 'Checked', value: summary.loadedOfficerCount && summary.loadedOfficerCount !== summary.totalOfficers ? `${summary.totalOfficers} of ${summary.loadedOfficerCount}` : String(summary.totalOfficers), inline: true },
       { name: 'Counts', value: `Active: ${summary.activeCount}\nSemi-Active: ${summary.semiActiveCount}\nInactive: ${summary.inactiveCount}\nLOA: ${summary.loaCount}\nExempt: ${summary.exemptCount}\nRecruit/Training Pending: ${summary.recruitPendingCount}\nErrors/Skipped: ${summary.errorCount}`, inline: false },
       { name: 'Inactive / Semi-Active / Errors', value: lines.join('\n').slice(0, 3900) || 'None', inline: false }
     )
