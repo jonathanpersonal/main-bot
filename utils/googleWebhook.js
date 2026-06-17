@@ -3,10 +3,17 @@ function getGoogleConfig() {
   const secret = process.env.GOOGLE_SCRIPT_SECRET;
   const departmentKey = process.env.GOOGLE_DEPARTMENT_KEY || 'main';
 
+  const parsedTimeoutMs = Number(process.env.GOOGLE_SCRIPT_TIMEOUT_MS || 120000);
+  const timeoutMs =
+    Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0
+      ? parsedTimeoutMs
+      : 120000;
+
   return {
     webAppUrl,
     secret,
     departmentKey,
+    timeoutMs,
     enabled: Boolean(webAppUrl && secret)
   };
 }
@@ -15,11 +22,13 @@ async function postToGoogle(route, data = {}) {
   const config = getGoogleConfig();
 
   if (!config.enabled) {
-    throw new Error('Google integration is not configured. Missing GOOGLE_SCRIPT_WEBAPP_URL or GOOGLE_SCRIPT_SECRET.');
+    throw new Error(
+      'Google integration is not configured. Missing GOOGLE_SCRIPT_WEBAPP_URL or GOOGLE_SCRIPT_SECRET.'
+    );
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
 
   try {
     const response = await fetch(config.webAppUrl, {
@@ -41,7 +50,7 @@ async function postToGoogle(route, data = {}) {
     try {
       json = JSON.parse(text);
     } catch (error) {
-      throw new Error(`Google returned non-JSON response: ${text.slice(0, 500)}`);
+      throw new Error(`Google returned a non-JSON response: ${text.slice(0, 500)}`);
     }
 
     if (!response.ok) {
@@ -53,6 +62,15 @@ async function postToGoogle(route, data = {}) {
     }
 
     return json;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(
+        `Google Apps Script did not respond within ${Math.round(config.timeoutMs / 1000)} seconds. ` +
+          'The request may still have completed in Google, so check BotRequests/BotActions before trying again.'
+      );
+    }
+
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
