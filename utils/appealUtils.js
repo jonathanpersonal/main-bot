@@ -938,21 +938,19 @@ async function updateAppealTags(thread, serverConfig, addTagNames, removeTagName
 
 async function closeAppealThread(thread, serverConfig, finalStatus) {
   const result = {
-    tagsApplied: false,
+    appliedFinalTag: false,
+    appliedClosedTag: false,
     locked: false,
     archived: false,
-    errors: []
+    warnings: []
   };
 
-  result.tagsApplied = await updateAppealTags(
-    thread,
-    serverConfig,
-    [finalStatus, 'closed'],
-    ['pending', 'underReview', 'infoNeeded']
-  );
+  const tagResult = await updateFinalAppealTags(thread, serverConfig, finalStatus);
+  result.appliedFinalTag = tagResult.appliedFinalTag;
+  result.appliedClosedTag = tagResult.appliedClosedTag;
+  result.warnings.push(...tagResult.warnings);
 
-  if (!result.tagsApplied) {
-    result.errors.push('Could not apply final/closed appeal tags.');
+  if (tagResult.warnings.length > 0) {
     await safeThreadSend(thread, 'Warning: this appeal was finalized, but the bot could not apply the final/closed forum tags automatically.');
   }
 
@@ -963,11 +961,11 @@ async function closeAppealThread(thread, serverConfig, finalStatus) {
     } catch (error) {
       const warning = `Could not lock appeal thread ${thread.id}:`;
       console.warn(warning, error);
-      result.errors.push('Could not lock the appeal thread.');
+      result.warnings.push('Could not lock the appeal thread.');
       await safeThreadSend(thread, 'Warning: this appeal was finalized, but the bot could not lock this thread automatically.');
     }
   } else {
-    result.errors.push('This channel does not support thread locking.');
+    result.warnings.push('This channel does not support thread locking.');
   }
 
   if (thread && typeof thread.setArchived === 'function') {
@@ -977,11 +975,11 @@ async function closeAppealThread(thread, serverConfig, finalStatus) {
     } catch (error) {
       const warning = `Could not archive appeal thread ${thread.id}:`;
       console.warn(warning, error);
-      result.errors.push('Could not archive the appeal thread.');
+      result.warnings.push('Could not archive the appeal thread.');
       await safeThreadSend(thread, 'Warning: this appeal was finalized, but the bot could not archive this thread automatically.');
     }
   } else {
-    result.errors.push('This channel does not support thread archiving.');
+    result.warnings.push('This channel does not support thread archiving.');
   }
 
   return result;
@@ -990,8 +988,51 @@ async function closeAppealThread(thread, serverConfig, finalStatus) {
 function formatCloseResultForReply(result) {
   if (!result) return '';
 
-  const warnings = result.errors?.length ? ` Warnings: ${result.errors.join(' ')}` : '';
-  return `Thread close result: tags ${result.tagsApplied ? 'applied' : 'not applied'}, locked ${result.locked ? 'yes' : 'no'}, archived ${result.archived ? 'yes' : 'no'}.${warnings}`;
+  const warnings = result.warnings?.length ? ` Warnings: ${result.warnings.join(' ')}` : '';
+  return [
+    'Thread close result:',
+    `final tag ${result.appliedFinalTag ? 'applied' : 'not applied'},`,
+    `closed tag ${result.appliedClosedTag ? 'applied' : 'not applied'},`,
+    `locked ${result.locked ? 'yes' : 'no'},`,
+    `archived ${result.archived ? 'yes' : 'no'}.`
+  ].join(' ') + warnings;
+}
+
+async function updateFinalAppealTags(thread, serverConfig, finalStatus) {
+  const result = {
+    appliedFinalTag: false,
+    appliedClosedTag: false,
+    warnings: []
+  };
+
+  if (!thread || typeof thread.setAppliedTags !== 'function') {
+    result.warnings.push('This channel does not support forum tags.');
+    return result;
+  }
+
+  const tags = serverConfig?.appeals?.tags || {};
+  const finalTagId = isConfiguredId(tags[finalStatus]) ? tags[finalStatus] : null;
+  const closedTagId = isConfiguredId(tags.closed) ? tags.closed : null;
+  const currentTags = Array.isArray(thread.appliedTags) ? [...thread.appliedTags] : [];
+  const removeTagIds = ['pending', 'underReview', 'infoNeeded']
+    .map((name) => tags[name])
+    .filter(isConfiguredId);
+  const nextTags = currentTags.filter((tagId) => !removeTagIds.includes(tagId));
+
+  if (finalTagId && !nextTags.includes(finalTagId)) nextTags.push(finalTagId);
+  if (closedTagId && !nextTags.includes(closedTagId)) nextTags.push(closedTagId);
+
+  try {
+    await thread.setAppliedTags(nextTags);
+    result.appliedFinalTag = !finalTagId || nextTags.includes(finalTagId);
+    result.appliedClosedTag = !closedTagId || nextTags.includes(closedTagId);
+  } catch (error) {
+    console.warn(`Could not update final appeal forum tags on thread ${thread.id}:`, error);
+    if (finalTagId) result.warnings.push(`Could not apply the ${finalStatus} appeal tag.`);
+    if (closedTagId) result.warnings.push('Could not apply the closed appeal tag.');
+  }
+
+  return result;
 }
 
 function getConfiguredTagId(serverConfig, tagName) {
