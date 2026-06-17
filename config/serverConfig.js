@@ -148,15 +148,6 @@ Your strike appeal has been approved.
 
 The strike has been removed from your record.
 
-Reason:
-{approvalReason}
-
-Comments/notes:
-{comments}
-
-Next steps:
-{nextSteps}
-
 Regards,
 Internal Affairs Team`,
       deniedStrike: `Dear {officerName},
