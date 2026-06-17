@@ -612,8 +612,6 @@ Internal Affairs Team`
       ]
     },
 
-    // TODO: Future phases should implement LOA requests, timecard corrections,
-    // activity cycle reports/findings, and Command Staff review workflows.
     googleWebhook: {
       enabled: false,
       urlEnvName: 'GOOGLE_DUTY_WEBHOOK_URL'
@@ -623,13 +621,13 @@ Internal Affairs Team`
 
   tickets: {
     enabled: true,
-    panelChannelId: '',
-    categoryId: '',
-    archiveCategoryId: '',
-    logChannelId: '',
-    transcriptChannelId: '',
-    staffRoleIds: [],
-    adminRoleIds: [],
+    panelChannelId: '1177026471563370528',
+    categoryId: '1516881267197612282',
+    archiveCategoryId: '1516881336235987054',
+    logChannelId: '1513565727045718117',
+    transcriptChannelId: '1513565727045718117',
+    staffRoleIds: [`1177028178749952141`],
+    adminRoleIds: [`1183965439496298608`],
     closeBehavior: 'archive',
     transcriptOnClose: true,
     lockdownPresets: [
