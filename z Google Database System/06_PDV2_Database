@@ -43,7 +43,7 @@ function pdv2MapIncomingOfficerRecord_(data) {
 
 function pdv2GetActiveRosterOptions_() {
   var rows = pdv2ListRows_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG).filter(function(row) {
-    return pdv2Bool_(row.Active, false) && pdv2String_(row.DatabaseColumnName);
+    return pdv2Bool_(row.Active, false) && pdv2String_(row.OptionKey);
   });
   rows.sort(function(a, b) {
     var orderA = Number(a.DisplayOrder || 0);
@@ -54,18 +54,223 @@ function pdv2GetActiveRosterOptions_() {
   return rows;
 }
 
-function pdv2EnsureDatabaseRosterOptionColumns_() {
-  var columns = pdv2GetActiveRosterOptions_().map(function(option) {
-    return pdv2String_(option.DatabaseColumnName);
-  }).filter(function(column, index, all) {
-    return column && all.indexOf(column) === index;
-  });
+function pdv2EscapeFormulaString_(value) {
+  return String(value === undefined || value === null ? '' : value).replace(/"/g, '""');
+}
 
-  if (columns.length) {
-    pdv2EnsureHeaders_(pdv2EnsureSheet_(PDV2.SHEETS.DATABASE), columns);
+function pdv2BuildRosterColumnLabelFormula_(rowNumber) {
+  return '=C' + rowNumber;
+}
+
+function pdv2BuildRosterDatabaseColumnNameFormula_(rowNumber) {
+  return '=IF(B' + rowNumber + '="DIVISION","Division - "&C' + rowNumber + ',IF(B' + rowNumber + '="CERTIFICATION","Cert - "&C' + rowNumber + ',C' + rowNumber + '))';
+}
+
+function pdv2SetRosterOptionConfigFormulasForRow_(rowNumber) {
+  if (!rowNumber || rowNumber < 2) return pdv2Fail_('Missing RosterOptionsConfig row number for formula repair.');
+  var sh = pdv2EnsureSheet_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG);
+  var map = pdv2HeaderMap_(sh);
+  if (map.RosterColumnLabel) sh.getRange(rowNumber, map.RosterColumnLabel).setFormula(pdv2BuildRosterColumnLabelFormula_(rowNumber));
+  if (map.DatabaseColumnName) sh.getRange(rowNumber, map.DatabaseColumnName).setFormula(pdv2BuildRosterDatabaseColumnNameFormula_(rowNumber));
+  return pdv2Success_({ rowNumber: rowNumber });
+}
+
+function pdv2RepairRosterOptionsConfigFormulas_() {
+  var rows = pdv2ListRows_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG);
+  var repaired = 0;
+  rows.forEach(function(row) {
+    if (!pdv2String_(row.OptionKey)) return;
+    pdv2SetRosterOptionConfigFormulasForRow_(row.__rowNumber);
+    repaired++;
+  });
+  return pdv2Success_({ rowsChecked: rows.length, formulasRepaired: repaired });
+}
+
+function pdv2DefaultRosterOptionDatabaseColumnName_(option) {
+  var displayName = pdv2String_(option.DisplayName || option.RosterColumnLabel);
+  var optionType = pdv2Upper_(option.OptionType);
+  if (optionType === 'DIVISION') return 'Division - ' + displayName;
+  if (optionType === 'CERTIFICATION') return 'Cert - ' + displayName;
+  return displayName;
+}
+
+function pdv2RosterOptionKnownFallbackHeaders_() {
+  return {
+    DIV_FTO: ['Division - FTA/FTO'],
+    DIV_GTF: ['Division - GTF'],
+    DIV_SWAT: ['Division - SWAT'],
+    DIV_SSD: ['Division - SSD'],
+    DIV_IA: ['Division - IA'],
+    DIV_TBD_1: ['Division - TBD 1'],
+    DIV_TBD_2: ['Division - TBD 2'],
+    DIV_TBD_3: ['Division - TBD 3'],
+    CERT_LEGAL: ['Cert - LEGAL'],
+    CERT_RIFLE: ['Cert - Rifle Cert'],
+    CERT_TBD_1: ['Cert - TBD 1'],
+    CERT_TBD_2: ['Cert - TBD 2'],
+    CERT_TBD_3: ['Cert - TBD 3'],
+    CERT_TBD_4: ['Cert - TBD 4']
+  };
+}
+
+function pdv2RosterOptionFallbackHeaders_(option) {
+  var out = [];
+  var known = pdv2RosterOptionKnownFallbackHeaders_()[pdv2String_(option.OptionKey)] || [];
+  [option.DatabaseColumnName, pdv2DefaultRosterOptionDatabaseColumnName_(option)].concat(known).forEach(function(header) {
+    header = pdv2String_(header);
+    if (header && out.indexOf(header) < 0) out.push(header);
+  });
+  return out;
+}
+
+function pdv2BuildRosterOptionHeaderFormula_(optionKey, fallbackHeader) {
+  return '=IFERROR(INDEX(RosterOptionsConfig!$F:$F,MATCH("' + pdv2EscapeFormulaString_(optionKey) + '",RosterOptionsConfig!$A:$A,0)),"' + pdv2EscapeFormulaString_(fallbackHeader) + '")';
+}
+
+function pdv2FormulaReferencesRosterOptionKey_(formula, optionKey) {
+  formula = pdv2String_(formula);
+  optionKey = pdv2String_(optionKey);
+  return formula.indexOf('MATCH("' + optionKey + '"') >= 0 || formula.indexOf('MATCH("' + optionKey.replace(/"/g, '""') + '"') >= 0;
+}
+
+function pdv2FindExistingRosterOptionDatabaseColumn_(option) {
+  var sh = pdv2EnsureSheet_(PDV2.SHEETS.DATABASE);
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) return { column: 0, matches: [] };
+
+  var optionKey = pdv2String_(option.OptionKey);
+  var fallbackHeaders = pdv2RosterOptionFallbackHeaders_(option);
+  var values = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(pdv2String_);
+  var formulas = sh.getRange(1, 1, 1, lastCol).getFormulas()[0].map(pdv2String_);
+  var matches = [];
+
+  for (var i = 0; i < lastCol; i++) {
+    if (pdv2FormulaReferencesRosterOptionKey_(formulas[i], optionKey) || fallbackHeaders.indexOf(values[i]) >= 0) {
+      matches.push(i + 1);
+    }
   }
 
-  return pdv2Success_({ columnsChecked: columns.length, columns: columns });
+  return { column: matches.length ? matches[0] : 0, matches: matches };
+}
+
+function pdv2EnsureDatabaseRosterOptionHeaderFormula_(option) {
+  var sh = pdv2EnsureSheet_(PDV2.SHEETS.DATABASE);
+  var fallbackHeader = pdv2RosterOptionFallbackHeaders_(option)[0] || pdv2DefaultRosterOptionDatabaseColumnName_(option);
+  var found = pdv2FindExistingRosterOptionDatabaseColumn_(option);
+  var column = found.column;
+  var added = false;
+
+  if (!column) {
+    column = sh.getLastColumn() + 1;
+    added = true;
+  }
+
+  sh.getRange(1, column).setFormula(pdv2BuildRosterOptionHeaderFormula_(option.OptionKey, fallbackHeader));
+  if (added && sh.getLastRow() > 1) {
+    sh.getRange(2, column, sh.getLastRow() - 1, 1).setValue('FALSE');
+  }
+
+  return {
+    optionKey: pdv2String_(option.OptionKey),
+    column: column,
+    added: added,
+    formulaLinked: true,
+    duplicateColumns: found.matches.length > 1 ? found.matches.slice(1) : []
+  };
+}
+
+function pdv2EnsureDatabaseRosterOptionColumns_() {
+  return pdv2RepairDatabaseRosterOptionHeaderFormulas_();
+}
+
+function pdv2RepairDatabaseRosterOptionHeaderFormulas_() {
+  var options = pdv2GetActiveRosterOptions_();
+  var results = options.map(function(option) {
+    return pdv2EnsureDatabaseRosterOptionHeaderFormula_(option);
+  });
+  var added = results.filter(function(result) { return result.added; }).length;
+  var duplicates = [];
+  results.forEach(function(result) {
+    (result.duplicateColumns || []).forEach(function(column) {
+      duplicates.push({ optionKey: result.optionKey, column: column });
+    });
+  });
+  return pdv2Success_({
+    activeOptions: options.length,
+    columnsChecked: results.length,
+    columnsAdded: added,
+    formulaLinked: results.length,
+    duplicateOptionColumns: duplicates,
+    results: results
+  });
+}
+
+function pdv2RepairRosterOptionHeaderFormulas_() {
+  var configRepair = pdv2RepairRosterOptionsConfigFormulas_();
+  var databaseRepair = pdv2RepairDatabaseRosterOptionHeaderFormulas_();
+  return pdv2Success_({ config: configRepair, database: databaseRepair });
+}
+
+function pdv2GetActivityNoticesHeaderGapDiagnostics_() {
+  var sh = pdv2EnsureSheet_(PDV2.SHEETS.ACTIVITY_NOTICES);
+  var blankHeaders = [];
+  for (var col = 1; col <= sh.getLastColumn(); col++) {
+    if (pdv2String_(sh.getRange(1, col).getValue())) continue;
+    blankHeaders.push({
+      column: col,
+      hasDataBelow: pdv2ColumnHasDataBelowHeader_(sh, col)
+    });
+  }
+  return blankHeaders;
+}
+
+function pdv2RunRosterOptionsDiagnostics_() {
+  var ss = pdv2Spreadsheet_();
+  var options = pdv2GetActiveRosterOptions_();
+  var db = pdv2EnsureSheet_(PDV2.SHEETS.DATABASE);
+  var lastCol = db.getLastColumn();
+  var formulas = lastCol > 0 ? db.getRange(1, 1, 1, lastCol).getFormulas()[0].map(pdv2String_) : [];
+  var found = 0;
+  var wouldAdd = 0;
+  var formulaLinked = 0;
+  var duplicateOptionColumns = [];
+  var optionDiagnostics = [];
+
+  options.forEach(function(option) {
+    var existing = pdv2FindExistingRosterOptionDatabaseColumn_(option);
+    if (existing.column) found++;
+    else wouldAdd++;
+    if (existing.column && pdv2FormulaReferencesRosterOptionKey_(formulas[existing.column - 1], option.OptionKey)) formulaLinked++;
+    (existing.matches || []).slice(1).forEach(function(column) {
+      duplicateOptionColumns.push({ optionKey: pdv2String_(option.OptionKey), column: column });
+    });
+    optionDiagnostics.push({
+      optionKey: pdv2String_(option.OptionKey),
+      optionType: pdv2String_(option.OptionType),
+      displayName: pdv2String_(option.DisplayName),
+      databaseColumnName: pdv2String_(option.DatabaseColumnName || pdv2DefaultRosterOptionDatabaseColumnName_(option)),
+      foundColumn: existing.column,
+      matchingColumns: existing.matches
+    });
+  });
+
+  return pdv2Success_({
+    activeRosterOptionCount: options.length,
+    databaseOptionColumnsFound: found,
+    databaseOptionColumnsWouldBeAdded: wouldAdd,
+    databaseOptionHeadersFormulaLinked: formulaLinked,
+    duplicateOptionColumns: duplicateOptionColumns,
+    deprecatedConfigSheetsPresent: {
+      DivisionsConfig: !!ss.getSheetByName(PDV2.SHEETS.DIVISIONS_CONFIG),
+      CertificationsConfig: !!ss.getSheetByName(PDV2.SHEETS.CERTIFICATIONS_CONFIG)
+    },
+    activityNoticesHeaderGaps: pdv2GetActivityNoticesHeaderGapDiagnostics_(),
+    options: optionDiagnostics
+  });
+}
+
+function pdv2PreviewRosterOptionHeaderRepair_() {
+  return pdv2RunRosterOptionsDiagnostics_();
 }
 
 function pdv2MapRosterOptionValues_(data) {
@@ -73,7 +278,7 @@ function pdv2MapRosterOptionValues_(data) {
   var values = {};
   pdv2GetActiveRosterOptions_().forEach(function(option) {
     var key = pdv2String_(option.OptionKey);
-    var column = pdv2String_(option.DatabaseColumnName);
+    var column = pdv2String_(option.DatabaseColumnName || pdv2DefaultRosterOptionDatabaseColumnName_(option));
     if (!column) return;
     var raw = pdv2Pick_(data, [column, key], '');
     if (raw !== '') values[column] = pdv2Bool_(raw, false) ? 'TRUE' : 'FALSE';
@@ -84,6 +289,7 @@ function pdv2MapRosterOptionValues_(data) {
 function pdv2UpsertDatabaseRecord_(data, options) {
   options = options || {};
   data = data || {};
+  pdv2EnsureDatabaseRosterOptionColumns_();
   var record = pdv2MapIncomingOfficerRecord_(data);
   var rosterOptionValues = pdv2MapRosterOptionValues_(data);
   var discordId = pdv2String_(record['Discord ID']);
@@ -108,7 +314,7 @@ function pdv2UpsertDatabaseRecord_(data, options) {
   } else {
     if (!update['Status']) update['Status'] = 'Active';
     pdv2GetActiveRosterOptions_().forEach(function(option) {
-      var column = pdv2String_(option.DatabaseColumnName);
+      var column = pdv2String_(option.DatabaseColumnName || pdv2DefaultRosterOptionDatabaseColumnName_(option));
       if (column && update[column] === undefined) update[column] = 'FALSE';
     });
     pdv2AppendObject_(PDV2.SHEETS.DATABASE, update);
@@ -131,8 +337,9 @@ function pdv2ResolveRosterOptionColumn_(optionKeyOrDatabaseColumnName) {
   var rawUpper = pdv2Upper_(raw);
   var options = pdv2GetActiveRosterOptions_();
   for (var i = 0; i < options.length; i++) {
-    if (pdv2Upper_(options[i].OptionKey) === rawUpper || pdv2String_(options[i].DatabaseColumnName) === raw) {
-      return pdv2String_(options[i].DatabaseColumnName);
+    var column = pdv2String_(options[i].DatabaseColumnName || pdv2DefaultRosterOptionDatabaseColumnName_(options[i]));
+    if (pdv2Upper_(options[i].OptionKey) === rawUpper || column === raw || pdv2RosterOptionFallbackHeaders_(options[i]).indexOf(raw) >= 0) {
+      return column;
     }
   }
   return raw;
@@ -145,7 +352,7 @@ function pdv2SetOfficerRosterOptionValue_(discordId, optionKeyOrDatabaseColumnNa
   if (!discordId) return pdv2Fail_('Missing Discord ID for roster option update.');
   if (!column) return pdv2Fail_('Missing roster option key or Database column name.');
 
-  var activeColumns = pdv2GetActiveRosterOptions_().map(function(option) { return pdv2String_(option.DatabaseColumnName); });
+  var activeColumns = pdv2GetActiveRosterOptions_().map(function(option) { return pdv2String_(option.DatabaseColumnName || pdv2DefaultRosterOptionDatabaseColumnName_(option)); });
   if (activeColumns.indexOf(column) < 0) return pdv2Fail_('Roster option is not active or is not configured: ' + column + '.');
 
   pdv2EnsureDatabaseRosterOptionColumns_();
@@ -170,7 +377,7 @@ function pdv2GetOfficerRosterOptions_(discordId) {
   if (!recordResult.ok) return recordResult;
   var values = {};
   pdv2GetActiveRosterOptions_().forEach(function(option) {
-    var column = pdv2String_(option.DatabaseColumnName);
+    var column = pdv2String_(option.DatabaseColumnName || pdv2DefaultRosterOptionDatabaseColumnName_(option));
     values[pdv2String_(option.OptionKey)] = {
       optionKey: pdv2String_(option.OptionKey),
       optionType: pdv2String_(option.OptionType),

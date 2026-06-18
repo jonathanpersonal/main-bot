@@ -53,6 +53,58 @@ function pdv2EnsureHeaders_(sh, headers) {
   if (changed) pdv2FormatSheet_(sh);
 }
 
+function pdv2ColumnHasDataBelowHeader_(sh, column) {
+  if (!sh || sh.getLastRow() < 2) return false;
+  var values = sh.getRange(2, column, sh.getLastRow() - 1, 1).getValues();
+  return values.some(function(row) {
+    return pdv2String_(row[0]) !== '';
+  });
+}
+
+function pdv2RepairActivityNoticesHeaders_() {
+  var sh = pdv2GetSheet_(PDV2.SHEETS.ACTIVITY_NOTICES);
+  var expected = PDV2.HEADERS.ActivityNotices || [];
+  if (!expected.length) return pdv2Success_({ skipped: true, reason: 'No ActivityNotices headers configured.' });
+
+  var warnings = [];
+  var blankColumnsRemoved = 0;
+  var rewritten = false;
+
+  if (sh.getLastRow() <= 1) {
+    sh.getRange(1, 1, 1, expected.length).setValues([expected]);
+    if (sh.getLastColumn() > expected.length) {
+      sh.getRange(1, expected.length + 1, 1, sh.getLastColumn() - expected.length).clearContent();
+    }
+    pdv2FormatSheet_(sh);
+    return pdv2Success_({ rewritten: true, blankColumnsRemoved: 0, warnings: [] });
+  }
+
+  for (var col = sh.getLastColumn(); col >= 1; col--) {
+    var header = pdv2String_(sh.getRange(1, col).getValue());
+    if (header) continue;
+    if (pdv2ColumnHasDataBelowHeader_(sh, col)) {
+      warnings.push('Blank ActivityNotices header at column ' + col + ' has data below it; left in place.');
+      continue;
+    }
+    sh.deleteColumn(col);
+    blankColumnsRemoved++;
+  }
+
+  pdv2EnsureHeaders_(sh, expected);
+  pdv2FormatSheet_(sh);
+
+  if (warnings.length) {
+    pdv2Log_('WARN', 'INSTALL', 'ACTIVITY_NOTICES_HEADER_GAP_WARNING', 'ActivityNotices has blank header columns with data below them.', { warnings: warnings });
+  }
+
+  return pdv2Success_({
+    rewritten: rewritten,
+    blankColumnsRemoved: blankColumnsRemoved,
+    warnings: warnings,
+    headersChecked: expected.length
+  });
+}
+
 function pdv2FormatSheet_(sh) {
   if (!sh || sh.getLastColumn() < 1) return;
   sh.setFrozenRows(1);

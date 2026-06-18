@@ -24,6 +24,10 @@ function onOpen() {
       .addItem('Diagnose Roster Columns', 'pdv2MenuDiagnoseRosterColumns')
       .addItem('View Callsign Registry Summary', 'pdv2MenuViewCallsignRegistrySummary')
       .addItem('Seed Demo Callsign Slots', 'pdv2MenuSeedDemoCallsignSlots'))
+    .addSubMenu(ui.createMenu('Roster Options')
+      .addItem('Preview Dynamic Header Repair', 'pdv2MenuPreviewRosterOptionHeaderRepair')
+      .addItem('Repair Dynamic Header Formulas', 'pdv2MenuRepairRosterOptionHeaderFormulas')
+      .addItem('Run Roster Options Diagnostics', 'pdv2MenuRunRosterOptionsDiagnostics'))
     .addSeparator()
     .addItem('Show Setup Checklist', 'pdv2MenuShowSetupChecklist')
     .addToUi();
@@ -120,6 +124,25 @@ function pdv2MenuDiagnoseRosterColumns() {
 function pdv2MenuViewCallsignRegistrySummary() {
   var result = pdv2GetCallsignRegistrySummary_();
   SpreadsheetApp.getUi().alert('Callsign registry summary:\n\nAvailable: ' + result.available + '\nAssigned: ' + result.assigned + '\nReserved: ' + result.reserved + '\nDisabled: ' + result.disabled + '\nConflict: ' + result.conflict);
+}
+
+function pdv2MenuPreviewRosterOptionHeaderRepair() {
+  var result = pdv2PreviewRosterOptionHeaderRepair_();
+  SpreadsheetApp.getUi().alert('Roster option header repair preview:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuRepairRosterOptionHeaderFormulas() {
+  var result = pdv2RepairRosterOptionHeaderFormulas_();
+  var activityResult = pdv2RepairActivityNoticesHeaders_();
+  SpreadsheetApp.getUi().alert('Roster option header repair complete:\n\n' + JSON.stringify({
+    rosterOptions: result,
+    activityNotices: activityResult
+  }, null, 2));
+}
+
+function pdv2MenuRunRosterOptionsDiagnostics() {
+  var result = pdv2RunRosterOptionsDiagnostics_();
+  SpreadsheetApp.getUi().alert('Roster options diagnostics:\n\n' + JSON.stringify(result, null, 2));
 }
 
 function pdv2MenuSeedDemoCallsignSlots() {

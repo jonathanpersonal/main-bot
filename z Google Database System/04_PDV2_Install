@@ -15,12 +15,17 @@ function pdv2InstallOrRepairSystem() {
     pdv2SeedSystemConfig_();
     pdv2SeedStarterConfig_();
     pdv2SeedInitialStaffAccess_();
-    pdv2EnsureDatabaseRosterOptionColumns_();
+    var rosterOptionRepair = pdv2RepairRosterOptionHeaderFormulas_();
+    var activityNoticeRepair = pdv2RepairActivityNoticesHeaders_();
 
     pdv2Log_('INFO', 'INSTALL', 'SYSTEM_REPAIRED', 'Install/repair completed.', { sheetsChecked: checked.length });
-    pdv2Audit_('SHEET_MENU', 'SYSTEM_REPAIRED', Session.getActiveUser().getEmail(), 'System', 'PDV2', '', { sheetsChecked: checked });
+    pdv2Audit_('SHEET_MENU', 'SYSTEM_REPAIRED', Session.getActiveUser().getEmail(), 'System', 'PDV2', '', {
+      sheetsChecked: checked,
+      rosterOptionRepair: rosterOptionRepair,
+      activityNoticeRepair: activityNoticeRepair
+    });
 
-    return { ok: true, version: PDV2.VERSION, sheetsChecked: checked };
+    return { ok: true, version: PDV2.VERSION, sheetsChecked: checked, rosterOptionRepair: rosterOptionRepair, activityNoticeRepair: activityNoticeRepair };
   });
 }
 
@@ -134,8 +139,16 @@ function pdv2SeedDivisionAndCertificationConfig_() {
   divisions.forEach(function(item) {
     if (!pdv2FindRowByValue_(PDV2.SHEETS.DIVISIONS_CONFIG, 'DivisionKey', item[0])) {
       pdv2AppendObject_(PDV2.SHEETS.DIVISIONS_CONFIG, {
-        DivisionKey: item[0], DivisionName: item[1], RosterColumnLabel: item[2], DiscordRoleId: '', Active: 'TRUE', DisplayOrder: item[3], Notes: 'Starter division config. Edit per server.'
+        DivisionKey: item[0], DivisionName: item[1], RosterColumnLabel: item[2], DiscordRoleId: '', Active: 'TRUE', DisplayOrder: item[3], Notes: 'Legacy/deprecated. Use RosterOptionsConfig for roster option setup.'
       });
+    } else {
+      var divisionRow = pdv2FindRowByValue_(PDV2.SHEETS.DIVISIONS_CONFIG, 'DivisionKey', item[0]);
+      var divisionRecord = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.DIVISIONS_CONFIG), divisionRow) || {};
+      if (!pdv2String_(divisionRecord.Notes) || pdv2String_(divisionRecord.Notes).indexOf('Starter division config') >= 0) {
+        pdv2UpdateRowObject_(PDV2.SHEETS.DIVISIONS_CONFIG, divisionRow, {
+          Notes: 'Legacy/deprecated. Use RosterOptionsConfig for roster option setup.'
+        });
+      }
     }
   });
 
@@ -149,8 +162,16 @@ function pdv2SeedDivisionAndCertificationConfig_() {
   certifications.forEach(function(item) {
     if (!pdv2FindRowByValue_(PDV2.SHEETS.CERTIFICATIONS_CONFIG, 'CertificationKey', item[0])) {
       pdv2AppendObject_(PDV2.SHEETS.CERTIFICATIONS_CONFIG, {
-        CertificationKey: item[0], CertificationName: item[1], RosterColumnLabel: item[2], DiscordRoleId: '', Active: 'TRUE', DisplayOrder: item[3], Notes: 'Starter certification config. Edit per server.'
+        CertificationKey: item[0], CertificationName: item[1], RosterColumnLabel: item[2], DiscordRoleId: '', Active: 'TRUE', DisplayOrder: item[3], Notes: 'Legacy/deprecated. Use RosterOptionsConfig for roster option setup.'
       });
+    } else {
+      var certificationRow = pdv2FindRowByValue_(PDV2.SHEETS.CERTIFICATIONS_CONFIG, 'CertificationKey', item[0]);
+      var certificationRecord = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.CERTIFICATIONS_CONFIG), certificationRow) || {};
+      if (!pdv2String_(certificationRecord.Notes) || pdv2String_(certificationRecord.Notes).indexOf('Starter certification config') >= 0) {
+        pdv2UpdateRowObject_(PDV2.SHEETS.CERTIFICATIONS_CONFIG, certificationRow, {
+          Notes: 'Legacy/deprecated. Use RosterOptionsConfig for roster option setup.'
+        });
+      }
     }
   });
 }
@@ -159,39 +180,52 @@ function pdv2SeedDefaultRosterOptions_() {
   pdv2MigrateDeprecatedRosterOptionStarters_();
 
   var starterOptions = [
-    ['DIV_FTO', 'DIVISION', 'FTA/FTO', 'Division Membership', 'FTA/FTO', 'Division - FTA/FTO', 5],
-    ['DIV_GTF', 'DIVISION', 'GTF', 'Division Membership', 'GTF', 'Division - GTF', 10],
-    ['DIV_SWAT', 'DIVISION', 'SWAT', 'Division Membership', 'SWAT', 'Division - SWAT', 20],
-    ['DIV_SSD', 'DIVISION', 'SSD', 'Division Membership', 'SSD', 'Division - SSD', 30],
-    ['DIV_IA', 'DIVISION', 'IA', 'Division Membership', 'IA', 'Division - IA', 40],
-    ['DIV_TBD_1', 'DIVISION', 'TBD', 'Division Membership', 'TBD', 'Division - TBD 1', 50],
-    ['DIV_TBD_2', 'DIVISION', 'TBD', 'Division Membership', 'TBD', 'Division - TBD 2', 60],
-    ['DIV_TBD_3', 'DIVISION', 'TBD', 'Division Membership', 'TBD', 'Division - TBD 3', 70],
-    ['CERT_LEGAL', 'CERTIFICATION', 'LEGAL', 'Certifications', 'LEGAL', 'Cert - LEGAL', 5],
-    ['CERT_RIFLE', 'CERTIFICATION', 'Rifle Cert', 'Certifications', 'Rifle Cert', 'Cert - Rifle Cert', 10],
-    ['CERT_TBD_1', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 1', 20],
-    ['CERT_TBD_2', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 2', 30],
-    ['CERT_TBD_3', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 3', 40],
-    ['CERT_TBD_4', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 4', 50]
+    ['DIV_FTO', 'DIVISION', 'FTA/FTO', 'Division Membership', 5],
+    ['DIV_GTF', 'DIVISION', 'GTF', 'Division Membership', 10],
+    ['DIV_SWAT', 'DIVISION', 'SWAT', 'Division Membership', 20],
+    ['DIV_SSD', 'DIVISION', 'SSD', 'Division Membership', 30],
+    ['DIV_IA', 'DIVISION', 'IA', 'Division Membership', 40],
+    ['DIV_TBD_1', 'DIVISION', 'TBD 1', 'Division Membership', 50],
+    ['DIV_TBD_2', 'DIVISION', 'TBD 2', 'Division Membership', 60],
+    ['DIV_TBD_3', 'DIVISION', 'TBD 3', 'Division Membership', 70],
+    ['CERT_LEGAL', 'CERTIFICATION', 'LEGAL', 'Certifications', 5],
+    ['CERT_RIFLE', 'CERTIFICATION', 'Rifle Cert', 'Certifications', 10],
+    ['CERT_TBD_1', 'CERTIFICATION', 'TBD 1', 'Certifications', 20],
+    ['CERT_TBD_2', 'CERTIFICATION', 'TBD 2', 'Certifications', 30],
+    ['CERT_TBD_3', 'CERTIFICATION', 'TBD 3', 'Certifications', 40],
+    ['CERT_TBD_4', 'CERTIFICATION', 'TBD 4', 'Certifications', 50]
   ];
 
   var added = 0;
   starterOptions.forEach(function(item) {
-    if (!pdv2FindRowByValue_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, 'OptionKey', item[0])) {
+    var rowNumber = pdv2FindRowByValue_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, 'OptionKey', item[0]);
+    if (!rowNumber) {
       pdv2AppendObject_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, {
         'OptionKey': item[0],
         'OptionType': item[1],
         'DisplayName': item[2],
         'RosterGroup': item[3],
-        'RosterColumnLabel': item[4],
-        'DatabaseColumnName': item[5],
+        'RosterColumnLabel': '',
+        'DatabaseColumnName': '',
         'DiscordRoleId': '',
         'Active': 'TRUE',
-        'DisplayOrder': item[6],
+        'DisplayOrder': item[4],
         'Notes': 'Starter roster option. Edit per server.'
       });
+      rowNumber = pdv2FindRowByValue_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, 'OptionKey', item[0]);
       added++;
+    } else {
+      var existingOption = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG), rowNumber) || {};
+      var displayName = pdv2String_(existingOption.DisplayName);
+      var shouldRefreshDisplayName = !displayName || (item[0].indexOf('_TBD_') >= 0 && displayName === 'TBD');
+      pdv2UpdateRowObject_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, rowNumber, {
+        'OptionType': item[1],
+        'DisplayName': shouldRefreshDisplayName ? item[2] : displayName,
+        'RosterGroup': item[3],
+        'DisplayOrder': item[4]
+      });
     }
+    pdv2SetRosterOptionConfigFormulasForRow_(rowNumber);
   });
 
   return { added: added };
