@@ -7,7 +7,10 @@
     "start": "node index.js",
     "verify:officer-command": "node scripts/verifyOfficerCommandSchema.js",
     "verify:google-entrypoint": "node scripts/verifyGoogleAppsScriptEntrypoint.js",
-    "check:conflicts": "node scripts/checkNoConflictMarkers.js"
+    "check:conflicts": "node scripts/checkNoConflictMarkers.js",
+    "setup": "node scripts/setup-first-run.js",
+    "check": "npm run check:conflicts && npm run check:syntax",
+    "check:syntax": "node scripts/check-js-syntax.js"
   },
   "dependencies": {
     "discord.js": "^14.0.0",

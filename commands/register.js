@@ -48,7 +48,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const serverConfig = getServerConfig();
+    const serverConfig = getServerConfig(interaction.guildId);
     const registrationConfig = serverConfig.registration || {};
 
     if (registrationConfig.enabled === false) {
@@ -112,7 +112,7 @@ module.exports = {
     if (!interaction.customId.startsWith(`${CUSTOM_ID_PREFIX}:`)) return false;
 
     const [, , mode, targetDiscordId] = interaction.customId.split(':');
-    const serverConfig = getServerConfig();
+    const serverConfig = getServerConfig(interaction.guildId);
     const registrationConfig = serverConfig.registration || {};
     const googleConfig = getGoogleConfig();
 

@@ -19,8 +19,8 @@ const { safeSubmitDepartmentEvent } = require('./googleDepartmentEvents');
 
 const METADATA_PREFIX = 'ticket:';
 
-function getTicketConfig() {
-  return getServerConfig()?.tickets || {};
+function getTicketConfig(guildId) {
+  return getServerConfig(guildId)?.tickets || {};
 }
 
 function getTicketType(guildId, typeId) {
@@ -249,7 +249,7 @@ function formatMetadataKey(key) {
 async function sendTicketLog(guild, title, details) {
   return sendTicketLogEmbed({
     guild,
-    serverConfig: getServerConfig(),
+    serverConfig: getServerConfig(interaction?.guildId || guild?.id),
     title,
     details
   });

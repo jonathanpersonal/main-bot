@@ -36,7 +36,7 @@ module.exports = {
       .setRequired(true)),
 
   async execute(interaction) {
-    const serverConfig = getServerConfig();
+    const serverConfig = getServerConfig(interaction.guildId);
     const trainingConfig = serverConfig.trainingManagement || {};
     const action = interaction.options.getString('action');
     const officerUser = interaction.options.getUser('officer');
@@ -122,7 +122,7 @@ async function handleApplicationModal(interaction) {
   if (!state) return true;
   state.outcomeId = decisionId;
   state.details = getApplicationModalDetails(interaction, decisionId);
-  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig() }), components: [buildConfirmRow('app', decisionId, staffId, officerId, sessionId)], ephemeral: true });
+  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('app', decisionId, staffId, officerId, sessionId)], ephemeral: true });
   return true;
 }
 
@@ -144,7 +144,7 @@ async function handleCadetReviewModal(interaction) {
     improvementNotes: getField(interaction, 'improvementNotes'),
     additionalNotes: getField(interaction, 'additionalNotes')
   };
-  await interaction.reply({ content: `Choose training outcome for <@${officerId}>.`, components: [buildCadetOutcomeRow({ serverConfig: getServerConfig(), sessionId, staffId, officerId })], ephemeral: true });
+  await interaction.reply({ content: `Choose training outcome for <@${officerId}>.`, components: [buildCadetOutcomeRow({ serverConfig: getServerConfig(interaction.guildId), sessionId, staffId, officerId })], ephemeral: true });
   return true;
 }
 
@@ -155,7 +155,7 @@ async function handleCadetOutcomeSelect(interaction) {
   const outcomeId = interaction.values[0];
   state.outcomeId = outcomeId;
   if (outcomeId === 'pass') {
-    return interaction.update({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig() }), components: [buildConfirmRow('cadet', outcomeId, staffId, officerId, sessionId)] });
+    return interaction.update({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('cadet', outcomeId, staffId, officerId, sessionId)] });
   }
   return interaction.showModal(buildCadetExtraModal(outcomeId, staffId, officerId, sessionId));
 }
@@ -165,7 +165,7 @@ async function handleCadetExtraModal(interaction) {
   const state = getStateOrReply(interaction, sessionId, staffId, officerId);
   if (!state) return true;
   Object.assign(state.details, getCadetExtraModalDetails(interaction, outcomeId));
-  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig() }), components: [buildConfirmRow('cadet', outcomeId, staffId, officerId, sessionId)], ephemeral: true });
+  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('cadet', outcomeId, staffId, officerId, sessionId)], ephemeral: true });
   return true;
 }
 
@@ -183,7 +183,7 @@ async function handleTrainingConfirm(interaction) {
   const state = getStateOrReply(interaction, sessionId, staffId, officerId);
   if (!state) return true;
   await interaction.deferUpdate();
-  const serverConfig = getServerConfig();
+  const serverConfig = getServerConfig(interaction.guildId);
   const officerUser = await interaction.client.users.fetch(officerId);
   const officerMember = await interaction.guild.members.fetch(officerId);
   const cfg = getOutcomeConfig(serverConfig, flow, outcomeId);

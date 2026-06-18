@@ -5,3 +5,5 @@ package-lock.json
 
 # Local per-guild setup configs
 data/guildConfigs/*.json
+data/*.json
+config/local*.js

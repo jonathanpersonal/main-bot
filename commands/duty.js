@@ -1,5 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
-const serverConfig = require('../config/serverConfig');
+const { getServerConfig } = require('../utils/configUtils');
+let serverConfig = getServerConfig();
 const { getMemberRank } = require('../utils/rankUtils');
 const {
   ensureDutyTables,
@@ -125,6 +126,7 @@ module.exports = {
         .setDescription('Optional cycle end date in YYYY-MM-DD format.'))),
 
   async execute(interaction) {
+    serverConfig = getServerConfig(interaction.guildId);
     if (!serverConfig?.duty?.enabled) {
       return interaction.reply({
         content: 'Duty tracking is currently disabled for this server.',

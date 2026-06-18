@@ -40,7 +40,16 @@ jobs:
           rsync -av --delete database/ child-repo/database/
           rsync -av --delete handlers/ child-repo/handlers/
           rsync -av --delete scripts/ child-repo/scripts/
+          rsync -av --delete services/ child-repo/services/
           rsync -av --delete utils/ child-repo/utils/
+
+          if [ -d cloudflare ]; then
+            rsync -av --delete cloudflare/ child-repo/cloudflare/
+          fi
+
+          if [ -d "z Google Database System" ]; then
+            rsync -av --delete "z Google Database System/" "child-repo/z Google Database System/"
+          fi
 
           cp index.js child-repo/index.js
           cp package.json child-repo/package.json

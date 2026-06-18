@@ -96,7 +96,7 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const serverConfig = getServerConfig();
+    const serverConfig = getServerConfig(interaction.guildId);
 
     const action = interaction.options.getString('action');
     const officerUser = interaction.options.getUser('officer');
@@ -235,7 +235,7 @@ module.exports = {
     const selectedValue = interaction.values[0];
 
     if (selectType === 'rank') {
-      const targetRank = getRankByName(selectedValue, getServerConfig());
+      const targetRank = getRankByName(selectedValue, getServerConfig(interaction.guildId));
 
       if (!targetRank) {
         await interaction.update({
@@ -631,7 +631,7 @@ function buildConfirmationMessage(state) {
 }
 
 async function confirmOfficerAction({ interaction, state, stateKey }) {
-  const serverConfig = getServerConfig();
+  const serverConfig = getServerConfig(interaction.guildId);
   const officerUser = await interaction.client.users.fetch(state.officerUserId);
   const officerMember = await interaction.guild.members.fetch(state.officerUserId);
   const changedAt = new Date();
