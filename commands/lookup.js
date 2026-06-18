@@ -1,4 +1,4 @@
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getServerConfig } = require('../utils/configUtils');
 const { requirePermission, isHighCommand, isBotAdmin } = require('../utils/permissionUtils');
 const { lookupOfficer } = require('../utils/googleWebhook');
@@ -10,9 +10,9 @@ module.exports = {
   data: new SlashCommandBuilder().setName('lookup').setDescription('Look up an officer from Google Sheets.').addSubcommand((s) => s.setName('officer').setDescription('Look up by Discord user.').addUserOption((o) => o.setName('officer').setDescription('Officer to look up.').setRequired(true))),
   async execute(interaction) {
     const config = getServerConfig(interaction.guildId);
-    if (config.lookup?.enabled === false) return interaction.reply({ content: 'Lookup is disabled for this server.', ephemeral: true });
+    if (config.lookup?.enabled === false) return interaction.reply({ content: 'Lookup is disabled for this server.', flags: MessageFlags.Ephemeral });
     if (!await requirePermission(interaction, 'lookup', { config })) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const user = interaction.options.getUser('officer');
     let res;
     try { res = await lookupOfficer({ guildId: interaction.guildId, discordId: user.id, requestedByDiscordId: interaction.user.id }); }

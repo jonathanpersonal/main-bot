@@ -1,5 +1,7 @@
 const { postToGoogle } = require('./googleWebhook');
 const store = require('./workflowStore');
+const { getGuildConfig } = require('./guildConfigStore');
+const { isGoogleEnabled, isGoogleConfigured, warnGoogleMisconfiguredOnce } = require('./googleConfigUtils');
 
 function normalizeDate(value) {
   if (!value) return '';
@@ -45,7 +47,15 @@ function normalizeProbation(row = {}, guildId = '') {
   };
 }
 
+function canReadGoogle(guildId) {
+  const cfg = getGuildConfig(guildId);
+  if (!isGoogleEnabled(cfg)) return false;
+  if (!isGoogleConfigured(cfg)) { warnGoogleMisconfiguredOnce(guildId, cfg); return false; }
+  return true;
+}
+
 async function safeListActiveCadets(guildId) {
+  if (!canReadGoogle(guildId)) return null;
   try {
     const result = await postToGoogle('listTrainingCadets', { guildId });
     return (result.cadets || []).map((row) => normalizeCadet(row, guildId)).filter((row) => row.discordId);
@@ -56,6 +66,7 @@ async function safeListActiveCadets(guildId) {
 }
 
 async function safeListActiveProbation(guildId) {
+  if (!canReadGoogle(guildId)) return null;
   try {
     const result = await postToGoogle('listProbationaryOfficers', { guildId });
     return (result.probationary || []).map((row) => normalizeProbation(row, guildId)).filter((row) => row.discordId);
@@ -66,6 +77,7 @@ async function safeListActiveProbation(guildId) {
 }
 
 async function safeGetProbation(guildId, discordId) {
+  if (!canReadGoogle(guildId)) return store.getProbation(guildId, discordId);
   try {
     const result = await postToGoogle('getProbationaryOfficer', { guildId, discordId });
     return result.probation ? normalizeProbation(result.probation, guildId) : null;

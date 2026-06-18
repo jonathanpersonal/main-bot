@@ -9,7 +9,8 @@ const {
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  MessageFlags
 } = require('discord.js');
 
 const { getServerConfig } = require('./configUtils');
@@ -267,7 +268,7 @@ async function createTicket({ guild, typeId, targetUser, createdBy, reason, meta
   if (!system) {
     const existingChannel = await findOpenTicketChannel(guild, targetUser.id, type.id);
     if (existingChannel) {
-      await interaction.reply({ content: `You already have an open ticket: ${existingChannel}`, ephemeral: true });
+      await interaction.reply({ content: `You already have an open ticket: ${existingChannel}`, flags: MessageFlags.Ephemeral });
       return existingChannel;
     }
   }
@@ -302,7 +303,7 @@ async function createTicket({ guild, typeId, targetUser, createdBy, reason, meta
   await submitTicketGoogleEvent({ interaction, guild, actionType: 'TICKET_CREATED', actor: createdBy || targetUser, targetUser, channel, metadata: ticketMetadata, extra: { typeId: type.id, typeLabel: type.label, system, reason } });
 
   if (interaction) {
-    await interaction.reply({ content: `Your ticket has been created: ${channel}`, ephemeral: true });
+    await interaction.reply({ content: `Your ticket has been created: ${channel}`, flags: MessageFlags.Ephemeral });
   }
 
   return channel;
@@ -355,9 +356,9 @@ async function assertTicketControl(interaction) {
 
 async function replyEphemeral(interaction, content) {
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ content, ephemeral: true });
+    await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
   } else {
-    await interaction.reply({ content, ephemeral: true });
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -397,7 +398,7 @@ async function handleRenameModal(interaction) {
 
   const oldName = interaction.channel.name;
   await interaction.channel.setName(safeName(interaction.fields.getTextInputValue('name')));
-  await interaction.reply({ content: 'Ticket renamed.', ephemeral: true });
+  await interaction.reply({ content: 'Ticket renamed.', flags: MessageFlags.Ephemeral });
   await sendTicketLog(interaction.guild, 'Ticket renamed', `${interaction.channel} renamed by ${interaction.user}\nOld: ${oldName}\nNew: ${interaction.channel.name}`);
   await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_RENAMED', metadata: readTicketMetadata(interaction.channel), extra: { oldName, newName: interaction.channel.name } });
 }
@@ -415,7 +416,7 @@ async function transferTicket(interaction) {
 
   await interaction.reply({
     content: 'Select the new ticket type.',
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     components: [new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('ticket:transfer_select')
@@ -467,13 +468,13 @@ async function lockTicket(interaction) {
       .setDescription(preset.description?.slice(0, 100) || preset.id));
 
   if (options.length === 0) {
-    await interaction.reply({ content: 'No lockdown presets are configured.', ephemeral: true });
+    await interaction.reply({ content: 'No lockdown presets are configured.', flags: MessageFlags.Ephemeral });
     return;
   }
 
   await interaction.reply({
     content: 'Choose who should retain access during lockdown.',
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
     components: [new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('ticket:lockdown_select')
@@ -534,7 +535,7 @@ async function unlockTicket(interaction) {
 
   const type = getTicketType(interaction.guildId, metadata.typeId);
   if (!type) {
-    await interaction.reply({ content: 'This ticket type is no longer configured.', ephemeral: true });
+    await interaction.reply({ content: 'This ticket type is no longer configured.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -552,7 +553,7 @@ async function unlockTicket(interaction) {
     clientId: interaction.client.user.id
   }));
 
-  await interaction.reply({ content: 'Ticket unlocked and normal permissions restored.', ephemeral: true });
+  await interaction.reply({ content: 'Ticket unlocked and normal permissions restored.', flags: MessageFlags.Ephemeral });
   await interaction.channel.send({ content: 'Ticket unlocked and normal permissions restored.', components: controls(type, false) });
   await sendTicketLog(interaction.guild, 'Ticket unlocked', `${interaction.channel} unlocked by ${interaction.user}`);
   await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_UNLOCKED', metadata: nextMetadata });
@@ -579,7 +580,7 @@ async function handleCloseModal(interaction) {
   const metadata = await assertTicketControl(interaction);
   if (!metadata) return;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const cfg = getTicketConfig();
   const reason = interaction.fields.getTextInputValue('reason');

@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { canManageTickets, getListedTicketTypes, getTicketConfig } = require('../utils/ticketUtils');
 const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 
@@ -14,13 +14,13 @@ module.exports = {
     if (interaction.options.getSubcommand() !== 'post') return;
     const cfg = getTicketConfig(interaction.guildId);
     if (!canManageTickets(interaction.member, cfg)) {
-      await interaction.reply({ content: 'Only ticket staff/admins can post the ticket panel.', ephemeral: true });
+      await interaction.reply({ content: 'Only ticket staff/admins can post the ticket panel.', flags: MessageFlags.Ephemeral });
       return;
     }
 
     const types = getListedTicketTypes(interaction.guildId);
     if (!cfg.enabled || types.length === 0) {
-      await interaction.reply({ content: 'Tickets are disabled or no listed ticket types are enabled.', ephemeral: true });
+      await interaction.reply({ content: 'Tickets are disabled or no listed ticket types are enabled.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -41,6 +41,6 @@ module.exports = {
 
     const panelMessage = await interaction.channel.send({ embeds: [embed], components: rows });
     await safeSubmitDepartmentEvent({ actionType: 'TICKET_PANEL_POSTED', interaction, actor: interaction.user, payload: { channelId: interaction.channelId, messageId: panelMessage.id, ticketTypes: types.map((type) => type.id) } });
-    await interaction.reply({ content: 'Ticket panel posted.', ephemeral: true });
+    await interaction.reply({ content: 'Ticket panel posted.', flags: MessageFlags.Ephemeral });
   }
 };

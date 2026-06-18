@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getActiveGuildConfig } = require('../utils/configUtils');
 const { getGuildConfigPath } = require('../utils/guildConfigStore');
 
@@ -45,7 +45,7 @@ module.exports = {
 
     await interaction.reply({
       content: ['## Config Check', ...lines].join('\n'),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 };

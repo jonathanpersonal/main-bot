@@ -7,7 +7,8 @@ const {
   SlashCommandBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  MessageFlags
 } = require('discord.js');
 
 const { getServerConfig } = require('../utils/configUtils');
@@ -109,7 +110,7 @@ module.exports = {
     if (!interaction.guild) {
       return interaction.reply({
         content: 'This command can only be used inside a Discord server.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -127,7 +128,7 @@ module.exports = {
             '- The role ID in `config/serverConfig.js` is wrong.',
             '- The rank exists in Discord but has not been added to the config yet.'
           ].join('\n'),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -139,7 +140,7 @@ module.exports = {
           `Rank Role ID: \`${currentRank.rankRoleId}\``,
           `Permission Role ID: \`${currentRank.permissionRoleId}\``
         ].join('\n'),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -151,7 +152,7 @@ module.exports = {
             '',
             'Promote and Demote require the officer to already have a configured rank role.'
           ].join('\n'),
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
 
@@ -182,7 +183,7 @@ module.exports = {
 
     return interaction.reply({
       content: 'That officer management action is not available yet.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   },
 
@@ -195,7 +196,7 @@ module.exports = {
     if (!state || state.staffUserId !== interaction.user.id) {
       await interaction.reply({
         content: 'This officer management form expired or does not belong to you. Please run the command again.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -210,7 +211,7 @@ module.exports = {
           'Please choose blacklist and reapply options before confirming.'
         ].join('\n'),
         components: buildBlacklistReapplyRows(stateKey, state),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -218,7 +219,7 @@ module.exports = {
     await interaction.reply({
       content: buildConfirmationMessage(state),
       components: [buildConfirmationRow(stateKey, state.action)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   },
@@ -232,7 +233,7 @@ module.exports = {
     if (!state || state.staffUserId !== interaction.user.id) {
       await interaction.reply({
         content: 'This officer management selection expired or does not belong to you. Please run the command again.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -298,7 +299,7 @@ module.exports = {
     if (!state || state.staffUserId !== interaction.user.id) {
       await interaction.reply({
         content: 'This officer management confirmation expired or does not belong to you. Please run the command again.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -351,7 +352,7 @@ async function handlePromotionOrDemotion({
           ? 'This officer is already at the highest configured rank.'
           : 'This officer is already at the lowest configured rank.'
       ].join('\n'),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -376,7 +377,7 @@ async function handlePromotionOrDemotion({
       'No roles have been changed.'
     ].join('\n'),
     components: [buildRankSelectRow(stateKey, availableRanks)],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -400,7 +401,7 @@ async function showStrikeLevelSelect({ interaction, officerUser }) {
       'No DM has been sent and no staff log has been created.'
     ].join('\n'),
     components: [buildStrikeLevelSelectRow(stateKey)],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 

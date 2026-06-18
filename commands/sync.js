@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getServerConfig } = require('../utils/configUtils');
 const { requirePermission } = require('../utils/permissionUtils');
 const { syncOfficerFromGoogle, notifyOfficerSyncCompleted, notifyOfficerSyncFailed } = require('../utils/googleWebhook');
@@ -8,9 +8,9 @@ module.exports = {
   data: new SlashCommandBuilder().setName('sync').setDescription('Sync an officer from Google Sheets to Discord.').addSubcommand((s) => s.setName('officer').setDescription('Sync a selected officer.').addUserOption((o) => o.setName('officer').setDescription('Officer to sync.').setRequired(true)).addBooleanOption((o) => o.setName('dry-run').setDescription('Preview only; defaults to true.'))),
   async execute(interaction) {
     const config = getServerConfig(interaction.guildId);
-    if (config.sync?.enabled === false) return interaction.reply({ content: 'Sync is disabled for this server.', ephemeral: true });
+    if (config.sync?.enabled === false) return interaction.reply({ content: 'Sync is disabled for this server.', flags: MessageFlags.Ephemeral });
     if (!await requirePermission(interaction, 'sync', { config })) return;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const user = interaction.options.getUser('officer');
     const dryRun = interaction.options.getBoolean('dry-run') ?? config.sync?.dryRunDefault !== false;
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);

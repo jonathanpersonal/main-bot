@@ -1,4 +1,4 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, MessageFlags } = require('discord.js');
 
 function isSetupAdmin(interaction, config) {
   if (!interaction || !interaction.guild || !interaction.member) return false;
@@ -15,9 +15,9 @@ async function requireSetupAdmin(interaction, config) {
   const message = 'You do not have permission to run department setup. Ask the server owner, an Administrator, or a configured setup admin to run this.';
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ content: message, ephemeral: true });
+    await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral });
   } else {
-    await interaction.reply({ content: message, ephemeral: true });
+    await interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
   }
 
   return false;
