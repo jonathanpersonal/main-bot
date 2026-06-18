@@ -5,12 +5,15 @@ const {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  MessageFlags
 } = require('discord.js');
 const { createDefaultGuildConfig, createDefaultRank } = require('../config/defaultGuildConfig');
 const { getGuildConfig, saveGuildConfig, updateGuildConfig } = require('../utils/guildConfigStore');
 const { requireSetupAdmin } = require('../utils/setupPermissions');
 const { sanitizeConfigForDisplay } = require('../utils/configSanitizer');
+const { postToGoogle } = require('../utils/googleWebhook');
+const { isGoogleEnabled, isGoogleConfigured } = require('../utils/googleConfigUtils');
 
 const CUSTOM_ID_PREFIX = 'department-setup';
 
@@ -34,7 +37,9 @@ const channelTypeMap = {
   'ia-log': 'iaLogChannelId',
   'bot-admin-log': 'botAdminLogChannelId',
   'google-log': 'googleLogChannelId',
-  'ticket-panel': 'ticketPanelChannelId'
+  'ticket-panel': 'ticketPanelChannelId',
+  'server-errors': 'serverErrorLogChannelId',
+  'staff-log': 'staffLogChannelId'
 };
 
 module.exports = {
@@ -74,7 +79,9 @@ module.exports = {
         { name: 'ia-log', value: 'ia-log' },
         { name: 'bot-admin-log', value: 'bot-admin-log' },
         { name: 'google-log', value: 'google-log' },
-        { name: 'ticket-panel', value: 'ticket-panel' }))
+        { name: 'ticket-panel', value: 'ticket-panel' },
+        { name: 'server-errors', value: 'server-errors' },
+        { name: 'staff-log', value: 'staff-log' }))
       .addChannelOption((option) => option.setName('channel').setDescription('Channel to save.').setRequired(true)))
     .addSubcommand((subcommand) => subcommand
       .setName('rank-add')
@@ -82,13 +89,35 @@ module.exports = {
       .addStringOption((option) => option.setName('name').setDescription('Rank name.').setRequired(true))
       .addRoleOption((option) => option.setName('rank-role').setDescription('Discord rank role.').setRequired(true))
       .addIntegerOption((option) => option.setName('order').setDescription('Rank order. Higher number = higher rank.').setRequired(true))
+      .addStringOption((option) => option.setName('rank-key').setDescription('Stable rank key, such as officer_i.'))
       .addRoleOption((option) => option.setName('permission-role').setDescription('Optional permission role for this rank.'))
+      .addStringOption((option) => option.setName('department').setDescription('Department key; defaults to this server default.'))
+      .addBooleanOption((option) => option.setName('assign-callsign').setDescription('Can this rank receive automatic callsigns?'))
+      .addBooleanOption((option) => option.setName('active').setDescription('Is this rank active?'))
+      .addNumberOption((option) => option.setName('activity-active-hours').setDescription('Hours required for Active status.'))
+      .addNumberOption((option) => option.setName('activity-semi-active-hours').setDescription('Hours required for Semi-Active status.'))
+      .addBooleanOption((option) => option.setName('activity-exempt').setDescription('Exempt this rank from activity?'))
+      .addBooleanOption((option) => option.setName('activity-cadet').setDescription('Treat this rank as cadet/new officer for activity?'))
+      .addStringOption((option) => option.setName('notes').setDescription('Optional notes.'))
       .addBooleanOption((option) => option.setName('command-staff').setDescription('Is command staff?'))
       .addBooleanOption((option) => option.setName('supervisor').setDescription('Is supervisor?'))
       .addBooleanOption((option) => option.setName('probationary').setDescription('Is probationary?'))
       .addBooleanOption((option) => option.setName('recruit').setDescription('Is recruit?'))
       .addIntegerOption((option) => option.setName('minimum-days').setDescription('Minimum days in rank before promotion.')))
     .addSubcommand((subcommand) => subcommand.setName('rank-list').setDescription('List configured ranks.'))
+    .addSubcommand((subcommand) => subcommand
+      .setName('google-sync')
+      .setDescription('Explicitly sync local setup data to Google.')
+      .addStringOption((option) => option.setName('target').setDescription('What to sync.').setRequired(true).addChoices({ name: 'ranks', value: 'ranks' })))
+    .addSubcommand((subcommand) => subcommand
+      .setName('dev-mode')
+      .setDescription('Enable or disable dev-only mode.')
+      .addBooleanOption((option) => option.setName('enabled').setDescription('Enable dev-only mode?').setRequired(true))
+      .addUserOption((option) => option.setName('user').setDescription('Optional dev user to allow.'))
+      .addRoleOption((option) => option.setName('role').setDescription('Optional dev role to allow.')))
+    .addSubcommand((subcommand) => subcommand.setName('dev-mode-add-user').setDescription('Allow a user through dev-only mode.').addUserOption((option) => option.setName('user').setDescription('User to allow.').setRequired(true)))
+    .addSubcommand((subcommand) => subcommand.setName('dev-mode-add-role').setDescription('Allow a role through dev-only mode.').addRoleOption((option) => option.setName('role').setDescription('Role to allow.').setRequired(true)))
+    .addSubcommand((subcommand) => subcommand.setName('walkthrough').setDescription('Start the guided setup walkthrough.'))
     .addSubcommand((subcommand) => subcommand
       .setName('rank-remove')
       .setDescription('Remove a rank after confirmation.')
@@ -125,6 +154,11 @@ module.exports = {
     if (subcommand === 'channel') return saveChannel(interaction);
     if (subcommand === 'rank-add') return addRank(interaction);
     if (subcommand === 'rank-list') return listRanks(interaction, config);
+    if (subcommand === 'google-sync') return googleSync(interaction, config);
+    if (subcommand === 'dev-mode') return saveDevMode(interaction);
+    if (subcommand === 'dev-mode-add-user') return addDevUser(interaction);
+    if (subcommand === 'dev-mode-add-role') return addDevRole(interaction);
+    if (subcommand === 'walkthrough') return showWizard(interaction, config, 0);
     if (subcommand === 'rank-remove') return confirmRankRemove(interaction, config);
     if (subcommand === 'google') return saveGoogle(interaction);
     if (subcommand === 'ticket-type-add') return addTicketType(interaction);
@@ -142,7 +176,24 @@ module.exports = {
 
     const [, action, guildId, ...rest] = customId.split(':');
     if (guildId !== interaction.guildId) {
-      await interaction.reply({ content: 'This setup button belongs to a different server.', ephemeral: true });
+      await interaction.reply({ content: 'This setup button belongs to a different server.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    if (action === 'wizard' || action === 'wizard-skip') {
+      const step = Number(rest[0] || 0);
+      return showWizard(interaction, config, step, true);
+    }
+
+    if (action === 'wizard-cancel') {
+      updateGuildConfig(guildId, (draft) => { draft.setupWizard.inProgress = false; draft.setupWizard.updatedAt = new Date().toISOString(); return draft; });
+      await interaction.update({ content: 'Setup walkthrough cancelled. Your saved config was not erased.', embeds: [], components: [] });
+      return true;
+    }
+
+    if (action === 'wizard-finish') {
+      updateGuildConfig(guildId, (draft) => { draft.setup.completed = true; draft.setup.updatedAt = new Date().toISOString(); draft.setup.updatedBy = interaction.user.id; draft.setupWizard.inProgress = false; return draft; });
+      await interaction.update({ content: 'Setup walkthrough complete. You can now test /ping and setup commands. If Google is enabled, run /department-setup google-sync target:ranks when ready.', embeds: [], components: [] });
       return true;
     }
 
@@ -200,7 +251,7 @@ async function showStatus(interaction, config) {
       { name: 'Warnings', value: warnings.length ? warnings.map((warning) => `• ${warning}`).join('\n') : 'No major warnings.' }
     );
 
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function saveProfile(interaction) {
@@ -218,7 +269,7 @@ async function saveProfile(interaction) {
     return draft;
   });
 
-  return interaction.reply({ content: `Saved department profile: **${name}** (${acronym}).`, ephemeral: true });
+  return interaction.reply({ content: `Saved department profile: **${name}** (${acronym}).`, flags: MessageFlags.Ephemeral });
 }
 
 async function saveRole(interaction) {
@@ -236,7 +287,7 @@ async function saveRole(interaction) {
     return draft;
   });
 
-  return interaction.reply({ content: `Saved ${type} role: ${role}.`, ephemeral: true });
+  return interaction.reply({ content: `Saved ${type} role: ${role}.`, flags: MessageFlags.Ephemeral });
 }
 
 async function saveChannel(interaction) {
@@ -250,7 +301,7 @@ async function saveChannel(interaction) {
     return draft;
   });
 
-  return interaction.reply({ content: `Saved ${type} channel: ${channel}.`, ephemeral: true });
+  return interaction.reply({ content: `Saved ${type} channel: ${channel}.`, flags: MessageFlags.Ephemeral });
 }
 
 async function addRank(interaction) {
@@ -258,45 +309,72 @@ async function addRank(interaction) {
   const rankRole = interaction.options.getRole('rank-role', true);
   const permissionRole = interaction.options.getRole('permission-role');
   const order = interaction.options.getInteger('order', true);
+  const rankKey = (interaction.options.getString('rank-key') || slugifyRankKey(name)).trim();
   const config = getGuildConfig(interaction.guildId);
+  const department = (interaction.options.getString('department') || config.google?.departmentKey || config.departmentKey || 'main').trim() || 'main';
+  const existingByKey = config.ranks.find((rank) => (rank.key || '').toLowerCase() === rankKey.toLowerCase() && (rank.department || 'main').toLowerCase() === department.toLowerCase());
   const existingByName = config.ranks.find((rank) => rank.name.toLowerCase() === name.toLowerCase());
+  const existing = existingByKey || existingByName;
   const duplicateRole = config.ranks.find((rank) => rank.rankRoleId === rankRole.id && rank.name.toLowerCase() !== name.toLowerCase());
 
   if (duplicateRole) {
-    return interaction.reply({ content: `That rank role is already used by **${duplicateRole.name}**.`, ephemeral: true });
+    return interaction.reply({ content: `That rank role is already used by **${duplicateRole.name}**.`, flags: MessageFlags.Ephemeral });
   }
+
+  const activityExempt = interaction.options.getBoolean('activity-exempt') ?? existing?.activity?.exempt ?? existing?.isActivityExempt ?? false;
+  const activityCadet = interaction.options.getBoolean('activity-cadet') ?? existing?.activity?.cadet ?? existing?.isActivityCadet ?? false;
 
   const saved = updateGuildConfig(interaction.guildId, (draft) => {
     const rank = createDefaultRank({
-      ...(existingByName || {}),
+      ...(existing || {}),
+      key: rankKey,
       name,
       rankRoleId: rankRole.id,
-      permissionRoleId: permissionRole?.id || existingByName?.permissionRoleId || '',
+      permissionRoleId: permissionRole?.id || existing?.permissionRoleId || '',
       order,
-      isCommandStaff: interaction.options.getBoolean('command-staff') ?? existingByName?.isCommandStaff ?? false,
-      isSupervisor: interaction.options.getBoolean('supervisor') ?? existingByName?.isSupervisor ?? false,
-      isProbationary: interaction.options.getBoolean('probationary') ?? existingByName?.isProbationary ?? false,
-      isRecruit: interaction.options.getBoolean('recruit') ?? existingByName?.isRecruit ?? false,
+      level: order,
+      department,
+      assignCallsign: interaction.options.getBoolean('assign-callsign') ?? existing?.assignCallsign ?? false,
+      active: interaction.options.getBoolean('active') ?? existing?.active ?? true,
+      notes: interaction.options.getString('notes') ?? existing?.notes ?? '',
+      isCommandStaff: interaction.options.getBoolean('command-staff') ?? existing?.isCommandStaff ?? false,
+      isSupervisor: interaction.options.getBoolean('supervisor') ?? existing?.isSupervisor ?? false,
+      isProbationary: interaction.options.getBoolean('probationary') ?? existing?.isProbationary ?? false,
+      isRecruit: interaction.options.getBoolean('recruit') ?? existing?.isRecruit ?? false,
+      isActivityExempt: activityExempt,
+      isActivityCadet: activityCadet,
+      activity: {
+        ...(existing?.activity || {}),
+        activeHours: interaction.options.getNumber('activity-active-hours') ?? existing?.activity?.activeHours ?? null,
+        semiActiveHours: interaction.options.getNumber('activity-semi-active-hours') ?? existing?.activity?.semiActiveHours ?? null,
+        exempt: activityExempt,
+        cadet: activityCadet
+      },
       promotion: {
-        ...(existingByName?.promotion || {}),
-        minimumDaysInRank: interaction.options.getInteger('minimum-days') ?? existingByName?.promotion?.minimumDaysInRank ?? 0
+        ...(existing?.promotion || {}),
+        minimumDaysInRank: interaction.options.getInteger('minimum-days') ?? existing?.promotion?.minimumDaysInRank ?? 0
       }
     });
 
-    draft.ranks = draft.ranks.filter((existing) => existing.name.toLowerCase() !== name.toLowerCase());
+    draft.ranks = draft.ranks.filter((item) => item !== existing && !((item.key || '').toLowerCase() === rankKey.toLowerCase() && (item.department || 'main').toLowerCase() === department.toLowerCase()));
     draft.ranks.push(rank);
     draft.ranks.sort((a, b) => a.order - b.order);
     draft.setup.updatedBy = interaction.user.id;
+    draft.setup.updatedAt = new Date().toISOString();
     return draft;
   });
 
-  const savedRank = saved.ranks.find((rank) => rank.name.toLowerCase() === name.toLowerCase());
+  const savedRank = saved.ranks.find((rank) => (rank.key || '').toLowerCase() === rankKey.toLowerCase() && (rank.department || 'main').toLowerCase() === department.toLowerCase());
   const embed = new EmbedBuilder().setTitle('Rank Saved').setColor(0x2ecc71).addFields(formatRankFields(savedRank));
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  return interaction.reply({ content: 'Rank added to local config. Run /department-setup google-sync target:ranks when you are ready to push ranks to Google Sheets.', embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+function slugifyRankKey(name) {
+  return String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'rank';
 }
 
 async function listRanks(interaction, config) {
-  if (!config.ranks.length) return interaction.reply({ content: 'No ranks are configured yet.', ephemeral: true });
+  if (!config.ranks.length) return interaction.reply({ content: 'No ranks are configured yet.', flags: MessageFlags.Ephemeral });
 
   const description = config.ranks
     .slice()
@@ -304,20 +382,20 @@ async function listRanks(interaction, config) {
     .map((rank) => `**${rank.order}. ${rank.name}**\nRole: <@&${rank.rankRoleId}>${rank.permissionRoleId ? `\nPermission: <@&${rank.permissionRoleId}>` : ''}\nFlags: ${rankFlags(rank)}\nMinimum days: ${rank.promotion?.minimumDaysInRank || 0}`)
     .join('\n\n');
 
-  return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Configured Ranks').setDescription(description).setColor(0x3498db)], ephemeral: true });
+  return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Configured Ranks').setDescription(description).setColor(0x3498db)], flags: MessageFlags.Ephemeral });
 }
 
 async function confirmRankRemove(interaction, config) {
   const name = interaction.options.getString('name', true).trim();
   const rank = config.ranks.find((item) => item.name.toLowerCase() === name.toLowerCase());
-  if (!rank) return interaction.reply({ content: `No rank named **${name}** was found.`, ephemeral: true });
+  if (!rank) return interaction.reply({ content: `No rank named **${name}** was found.`, flags: MessageFlags.Ephemeral });
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:rank-remove-confirm:${interaction.guildId}:${encodeURIComponent(rank.name)}`).setLabel('Confirm Remove').setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:rank-remove-cancel:${interaction.guildId}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
   );
 
-  return interaction.reply({ content: `Are you sure you want to remove rank **${rank.name}**?`, components: [row], ephemeral: true });
+  return interaction.reply({ content: `Are you sure you want to remove rank **${rank.name}**?`, components: [row], flags: MessageFlags.Ephemeral });
 }
 
 async function saveGoogle(interaction) {
@@ -332,7 +410,7 @@ async function saveGoogle(interaction) {
     return draft;
   });
 
-  return interaction.reply({ content: `Google enabled: ${saved.google.enabled}\nWebhook: ${saved.google.webhookUrl ? 'SET' : 'NOT SET'}\nPolling URL: ${saved.google.pollingUrl ? 'SET' : 'NOT SET'}`, ephemeral: true });
+  return interaction.reply({ content: `Google enabled: ${saved.google.enabled}\nWebhook: ${saved.google.webhookUrl ? 'SET' : 'NOT SET'}\nPolling URL: ${saved.google.pollingUrl ? 'SET' : 'NOT SET'}`, flags: MessageFlags.Ephemeral });
 }
 
 async function addTicketType(interaction) {
@@ -361,11 +439,11 @@ async function addTicketType(interaction) {
     return draft;
   });
 
-  return interaction.reply({ content: `Saved ticket type **${name}**.`, ephemeral: true });
+  return interaction.reply({ content: `Saved ticket type **${name}**.`, flags: MessageFlags.Ephemeral });
 }
 
 async function listTicketTypes(interaction, config) {
-  if (!config.tickets.types.length) return interaction.reply({ content: 'No ticket types are configured yet.', ephemeral: true });
+  if (!config.tickets.types.length) return interaction.reply({ content: 'No ticket types are configured yet.', flags: MessageFlags.Ephemeral });
 
   const description = config.tickets.types.map((type) => [
     `**${type.name}**`,
@@ -376,15 +454,15 @@ async function listTicketTypes(interaction, config) {
     `Category: ${type.categoryChannelId ? `<#${type.categoryChannelId}>` : 'Not set'}`
   ].join('\n')).join('\n\n');
 
-  return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Configured Ticket Types').setDescription(description).setColor(0x3498db)], ephemeral: true });
+  return interaction.reply({ embeds: [new EmbedBuilder().setTitle('Configured Ticket Types').setDescription(description).setColor(0x3498db)], flags: MessageFlags.Ephemeral });
 }
 
 async function exportConfig(interaction, config) {
   const json = JSON.stringify(sanitizeConfigForDisplay(config), null, 2);
-  if (json.length < 1800) return interaction.reply({ content: `\`\`\`json\n${json}\n\`\`\``, ephemeral: true });
+  if (json.length < 1800) return interaction.reply({ content: `\`\`\`json\n${json}\n\`\`\``, flags: MessageFlags.Ephemeral });
 
   const attachment = new AttachmentBuilder(Buffer.from(json, 'utf8'), { name: `guild-config-${interaction.guildId}-sanitized.json` });
-  return interaction.reply({ content: 'Sanitized config export. Webhook secrets are not included.', files: [attachment], ephemeral: true });
+  return interaction.reply({ content: 'Sanitized config export. Webhook secrets are not included.', files: [attachment], flags: MessageFlags.Ephemeral });
 }
 
 async function confirmReset(interaction) {
@@ -393,7 +471,97 @@ async function confirmReset(interaction) {
     new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:reset-cancel:${interaction.guildId}`).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
   );
 
-  return interaction.reply({ content: 'Are you sure you want to reset all local department setup for this server?', components: [row], ephemeral: true });
+  return interaction.reply({ content: 'Are you sure you want to reset all local department setup for this server?', components: [row], flags: MessageFlags.Ephemeral });
+}
+
+async function googleSync(interaction, config) {
+  const target = interaction.options.getString('target', true);
+  if (target !== 'ranks') return interaction.reply({ content: 'Only target:ranks is supported right now.', flags: MessageFlags.Ephemeral });
+  if (!isGoogleEnabled(config)) return interaction.reply({ content: 'Google integration is disabled for this server. Rank sync was not run.', flags: MessageFlags.Ephemeral });
+  if (!isGoogleConfigured(config)) return interaction.reply({ content: 'Google integration is enabled, but the Google Web App / Worker URL is not configured.', flags: MessageFlags.Ephemeral });
+
+  const departmentKey = config.google?.departmentKey || config.departmentKey || 'main';
+  const payload = {
+    action: 'SYNC_RANKS_CONFIG',
+    actionType: 'SYNC_RANKS_CONFIG',
+    guildId: interaction.guildId,
+    departmentKey,
+    departmentName: config.department?.name || config.departmentName || interaction.guild?.name || '',
+    ranks: (config.ranks || []).map((rank) => ({
+      rankKey: rank.key || slugifyRankKey(rank.name),
+      rankName: rank.name,
+      rankOrder: rank.order ?? rank.level ?? 0,
+      department: rank.department || departmentKey,
+      assignCallsign: Boolean(rank.assignCallsign),
+      active: rank.active !== false,
+      discordRoleId: rank.rankRoleId || '',
+      permissionRoleId: rank.permissionRoleId || '',
+      notes: rank.notes || '',
+      activityActiveHours: rank.activity?.activeHours ?? null,
+      activitySemiActiveHours: rank.activity?.semiActiveHours ?? null,
+      activityExempt: Boolean(rank.activity?.exempt ?? rank.isActivityExempt),
+      activityCadet: Boolean(rank.activity?.cadet ?? rank.isActivityCadet)
+    }))
+  };
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const result = await postToGoogle('submitBotRequest', payload);
+  await interaction.editReply(`Rank sync complete.\nAdded: ${result.added ?? result.result?.added ?? 0}\nUpdated: ${result.updated ?? result.result?.updated ?? 0}\nSkipped: ${result.skipped ?? result.result?.skipped ?? 0}`);
+}
+
+async function saveDevMode(interaction) {
+  const enabled = interaction.options.getBoolean('enabled', true);
+  const user = interaction.options.getUser('user');
+  const role = interaction.options.getRole('role');
+  const saved = updateGuildConfig(interaction.guildId, (draft) => {
+    draft.devOnly.enabled = enabled;
+    draft.devOnly.bypassForBotAdmins = true;
+    if (user && !draft.devOnly.userIds.includes(user.id)) draft.devOnly.userIds.push(user.id);
+    if (role && !draft.devOnly.roleIds.includes(role.id)) draft.devOnly.roleIds.push(role.id);
+    draft.setup.updatedBy = interaction.user.id;
+    return draft;
+  });
+  const warning = enabled && !saved.devOnly.userIds.length && !saved.devOnly.roleIds.length && saved.devOnly.bypassForBotAdmins === false ? '\nWarning: no allowed dev user/role or bot admin bypass is configured.' : '';
+  return interaction.reply({ content: `Dev mode ${enabled ? 'enabled' : 'disabled'}. Only configured dev users/roles and bot admins can use setup commands.${warning}`, flags: MessageFlags.Ephemeral });
+}
+
+async function addDevUser(interaction) {
+  const user = interaction.options.getUser('user', true);
+  updateGuildConfig(interaction.guildId, (draft) => { if (!draft.devOnly.userIds.includes(user.id)) draft.devOnly.userIds.push(user.id); return draft; });
+  return interaction.reply({ content: `Added ${user} to dev mode access.`, flags: MessageFlags.Ephemeral });
+}
+
+async function addDevRole(interaction) {
+  const role = interaction.options.getRole('role', true);
+  updateGuildConfig(interaction.guildId, (draft) => { if (!draft.devOnly.roleIds.includes(role.id)) draft.devOnly.roleIds.push(role.id); return draft; });
+  return interaction.reply({ content: `Added ${role} to dev mode access.`, flags: MessageFlags.Ephemeral });
+}
+
+async function showWizard(interaction, config, step = 0, update = false) {
+  const steps = [
+    ['Welcome', 'This walkthrough helps configure dev mode, department identity, setup/admin roles, command staff roles, log channels, error log channel, Google integration, ranks, tickets, and final review.'],
+    ['Enable dev mode', 'Use /department-setup dev-mode enabled:true user:@You role:@DevRole to limit access while setting up.'],
+    ['Department identity', 'Use /department-setup profile to save Department Name and Acronym. Department key defaults to main.'],
+    ['Core roles', 'Use /department-setup role type:setup-admin, command-staff, high-command, supervisor, member, and previous-officer.'],
+    ['Log channels', 'Use /department-setup channel. The server error log channel is type:server-errors.'],
+    ['Google integration', 'Use /department-setup google enabled:true only after URLs/secrets are configured in environment variables.'],
+    ['Rank setup', 'Use /department-setup rank-add with required name, rank-role, order and optional activity fields. Ranks save locally only.'],
+    ['Ticket basics', 'Use ticket setup commands for ticket types and ticket panel settings.'],
+    ['Final review', `Department: ${config.department?.name || 'Not set'}\nDev mode: ${config.devOnly?.enabled ? 'Enabled' : 'Disabled'}\nRanks: ${(config.ranks || []).length}\nGoogle: ${config.google?.enabled ? 'Enabled' : 'Disabled'}\nServer error channel: ${config.channels?.serverErrorLogChannelId ? 'Set' : 'Not set'}`]
+  ];
+  const index = Math.max(0, Math.min(step, steps.length - 1));
+  updateGuildConfig(interaction.guildId, (draft) => { draft.setupWizard = { inProgress: true, step: steps[index][0], startedBy: draft.setupWizard?.startedBy || interaction.user.id, startedAt: draft.setupWizard?.startedAt || new Date().toISOString(), updatedAt: new Date().toISOString() }; return draft; });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard:${interaction.guildId}:${Math.max(0, index - 1)}`).setLabel('Back').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard:${interaction.guildId}:${Math.min(steps.length - 1, index + 1)}`).setLabel(index === 0 ? 'Start' : 'Next').setStyle(ButtonStyle.Primary).setDisabled(index === steps.length - 1),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard-skip:${interaction.guildId}:${Math.min(steps.length - 1, index + 1)}`).setLabel('Skip').setStyle(ButtonStyle.Secondary).setDisabled(index === steps.length - 1),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard-cancel:${interaction.guildId}`).setLabel('Cancel').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard-finish:${interaction.guildId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
+  );
+  const embed = new EmbedBuilder().setTitle(`Setup Walkthrough: ${steps[index][0]}`).setDescription(steps[index][1]).setColor(0x5865f2).setFooter({ text: `Step ${index + 1} of ${steps.length}` });
+  const payload = { embeds: [embed], components: [row] };
+  if (update) return interaction.update(payload);
+  return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
 function formatRankFields(rank) {

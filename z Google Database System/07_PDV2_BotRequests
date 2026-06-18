@@ -135,6 +135,10 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
       return pdv2RegisterOfficerFromBotRequest_(requestId, data);
     }
 
+    if (actionType === 'SYNC_RANKS_CONFIG') {
+      return pdv2SyncRanksConfig_(data);
+    }
+
     if (actionType === 'PROMOTE' || actionType === 'DEMOTE' || actionType === 'SET_RANK') {
       var rankResult = pdv2SetDatabaseRank_(data, {
         source: source,
@@ -358,4 +362,62 @@ function pdv2GetRequestStatus_(requestId) {
     return pdv2String_(action['Request ID']) === pdv2String_(requestId);
   });
   return pdv2Success_({ request: record, actions: actions });
+}
+
+
+function pdv2SyncRanksConfig_(data) {
+  var ranks = data.ranks || (data.payload && data.payload.ranks) || [];
+  if (!Array.isArray(ranks)) ranks = [];
+  pdv2EnsureSheet_(PDV2.SHEETS.RANKS);
+  var sh = pdv2GetSheet_(PDV2.SHEETS.RANKS);
+  var map = pdv2HeaderMap_(sh);
+  var existing = pdv2ListRows_(PDV2.SHEETS.RANKS);
+  var index = {};
+  existing.forEach(function(row, i) {
+    var key = pdv2String_(row['Rank Key']).toLowerCase();
+    var dept = pdv2String_(row.Department || data.departmentKey || 'main').toLowerCase();
+    if (key) index[key + '|' + dept] = i + 2;
+  });
+
+  var added = 0;
+  var updated = 0;
+  var skipped = 0;
+  var errors = [];
+  ranks.forEach(function(rank) {
+    try {
+      var rankKey = pdv2String_(rank.rankKey || rank.key);
+      var department = pdv2String_(rank.department || data.departmentKey || 'main') || 'main';
+      if (!rankKey) { skipped++; return; }
+      var rowObject = {
+        'Rank Key': rankKey,
+        'Rank Name': pdv2String_(rank.rankName || rank.name),
+        'Rank Order': rank.rankOrder || rank.order || 0,
+        'Department': department,
+        'Assign Callsign': rank.assignCallsign === true ? 'TRUE' : 'FALSE',
+        'Active': rank.active === false ? 'FALSE' : 'TRUE',
+        'Discord Role ID': pdv2String_(rank.discordRoleId || rank.rankRoleId),
+        'Permission Role ID': pdv2String_(rank.permissionRoleId),
+        'Notes': pdv2String_(rank.notes),
+        'Updated At': pdv2Now_(),
+        'Activity Active Hours': rank.activityActiveHours == null ? '' : rank.activityActiveHours,
+        'Activity Semi Active Hours': rank.activitySemiActiveHours == null ? '' : rank.activitySemiActiveHours,
+        'Activity Exempt': rank.activityExempt === true ? 'TRUE' : 'FALSE',
+        'Activity Cadet': rank.activityCadet === true ? 'TRUE' : 'FALSE'
+      };
+      var rowNumber = index[rankKey.toLowerCase() + '|' + department.toLowerCase()];
+      if (rowNumber) {
+        Object.keys(rowObject).forEach(function(header) {
+          if (map[header]) sh.getRange(rowNumber, map[header]).setValue(rowObject[header]);
+        });
+        updated++;
+      } else {
+        pdv2AppendObjects_(PDV2.SHEETS.RANKS, [rowObject]);
+        added++;
+      }
+    } catch (err) {
+      skipped++;
+      errors.push(err.message || String(err));
+    }
+  });
+  return { ok: true, action: 'SYNC_RANKS_CONFIG', added: added, updated: updated, skipped: skipped, errors: errors };
 }

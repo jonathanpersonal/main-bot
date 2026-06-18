@@ -1,4 +1,6 @@
 const { getGoogleConfig, submitBotRequest } = require('./googleWebhook');
+const { getGuildConfig } = require('./guildConfigStore');
+const { isGoogleEnabled, isGoogleConfigured, warnGoogleMisconfiguredOnce } = require('./googleConfigUtils');
 
 function getUserTag(user) {
   if (!user) return null;
@@ -59,6 +61,10 @@ async function submitDepartmentEvent(options = {}) {
 }
 
 async function safeSubmitDepartmentEvent(options = {}) {
+  const guildId = options.guildId || options.interaction?.guildId;
+  const cfg = guildId ? getGuildConfig(guildId) : {};
+  if (guildId && !isGoogleEnabled(cfg)) return { ok: false, skipped: true, reason: 'Google disabled' };
+  if (guildId && !isGoogleConfigured(cfg)) { warnGoogleMisconfiguredOnce(guildId, cfg); return { ok: false, skipped: true, reason: 'Google misconfigured' }; }
   try {
     return await submitDepartmentEvent(options);
   } catch (error) {
