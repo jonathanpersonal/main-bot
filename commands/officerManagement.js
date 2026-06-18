@@ -845,6 +845,24 @@ async function confirmRankChange({
     changedAt
   });
 
+<<<<<<< ours
+=======
+  await interaction.editReply({
+    content: [
+      `${officerUser} was successfully ${actionPastTense}.`,
+      '',
+      `Old Rank: **${currentRank.name}**`,
+      `New Rank: **${targetRank.name}**`,
+      '',
+      `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
+      `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`,
+      '',
+      'Submitting Google rank-change event now...'
+    ].join('\n'),
+    components: []
+  });
+
+>>>>>>> theirs
   const oldRankRoleIds = getRankRoleIdsForPayload(currentRank);
   const newRankRoleIds = getRankRoleIdsForPayload(targetRank);
   const removedRoleIds = oldRankRoleIds.filter((roleId) => !newRankRoleIds.includes(roleId));
@@ -896,14 +914,40 @@ async function confirmRankChange({
       `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
       `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`,
       '',
+<<<<<<< ours
       googleResult.ok === false
         ? `⚠️ Discord roles were changed, but Google logging failed: ${googleResult.error.message}`
         : 'Google rank-change event submitted.'
+=======
+      buildGoogleSubmissionStatus(googleResult)
+>>>>>>> theirs
     ].join('\n'),
     components: []
   });
 }
 
+<<<<<<< ours
+=======
+
+function buildGoogleSubmissionStatus(googleResult) {
+  if (googleResult?.ok === false) {
+    return `⚠️ Discord roles were changed, but Google logging failed: ${googleResult.error.message}`;
+  }
+
+  const requestId = googleResult?.requestId
+    || googleResult?.botRequestId
+    || googleResult?.data?.requestId
+    || googleResult?.data?.botRequestId;
+  const message = googleResult?.message || googleResult?.data?.message;
+
+  return [
+    '✅ Google rank-change event submitted.',
+    requestId ? `Google Request ID: \`${requestId}\`` : null,
+    message ? `Google Response: ${message}` : null
+  ].filter(Boolean).join('\n');
+}
+
+>>>>>>> theirs
 function getRankRoleIdsForPayload(rank) {
   return [rank?.rankRoleId, rank?.permissionRoleId].filter((roleId) => {
     return roleId && typeof roleId === 'string' && !roleId.startsWith('PUT_') && !roleId.startsWith('PASTE_');

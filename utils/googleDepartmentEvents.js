@@ -1,4 +1,5 @@
 <<<<<<< ours
+<<<<<<< ours
 const { getGoogleConfig, submitBotRequest } = require('./googleWebhook');
 
 function getUserTag(user) {
@@ -104,6 +105,8 @@ module.exports = {
   buildDepartmentEventPayload
 };
 =======
+=======
+>>>>>>> theirs
 const { getGoogleConfig, submitBotRequest } = require('./googleWebhook');
 
 function getUserTag(user) {
@@ -208,4 +211,7 @@ module.exports = {
   submitAppealEvent,
   buildDepartmentEventPayload
 };
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs

@@ -1,4 +1,5 @@
 <<<<<<< ours
+<<<<<<< ours
 const {
   getPendingBotActions,
   markBotActionComplete,
@@ -143,6 +144,8 @@ module.exports = {
   getPollingConfig
 };
 =======
+=======
+>>>>>>> theirs
 const {
   getPendingBotActions,
   markBotActionComplete,
@@ -286,4 +289,7 @@ module.exports = {
   processBotAction,
   getPollingConfig
 };
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs

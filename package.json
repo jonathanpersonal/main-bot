@@ -12,6 +12,5 @@
     "dotenv": "^16.0.0",
     "mysql2": "^3.11.0",
     "node-cron": "^3.0.3",
-    "ts3-nodejs-library": "^3.1.0"
   }
 }
