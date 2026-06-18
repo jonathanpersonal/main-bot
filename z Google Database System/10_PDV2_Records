@@ -377,6 +377,93 @@ function pdv2ApplyTimecardCorrectionToPatrolLog_(data, requestId) {
   });
 }
 
+function pdv2ActivityReportStatusLabel_(status) {
+  status = pdv2Upper_(status);
+  if (status === 'ACTIVE') return 'Active';
+  if (status === 'SEMI_ACTIVE') return 'Semi Active';
+  if (status === 'INACTIVE') return 'Inactive';
+  if (status === 'LOA') return 'LOA';
+  if (status === 'EXEMPT') return 'Exempt';
+  if (status === 'RECRUIT_TRAINING_PENDING') return 'New';
+  if (status === 'ERROR') return 'Error';
+  return pdv2String_(status);
+}
+
+function pdv2ApplyActivityReportToDatabase_(data, requestId) {
+  data = data || {};
+  var dryRun = pdv2Bool_(pdv2Pick_(data, ['dryRun'], false), false);
+  var findings = data.findings && Array.isArray(data.findings) ? data.findings : [];
+  var updated = 0;
+  var skipped = 0;
+  var missing = 0;
+  var errors = [];
+
+  if (dryRun) {
+    pdv2Audit_('DISCORD_BOT', 'ACTIVITY_REPORT_DRY_RUN_RECEIVED', pdv2Pick_(data, ['submittedByDiscordId'], ''), 'Database', '', requestId || '', {
+      cycleId: pdv2Pick_(data, ['cycleId'], ''),
+      cycleStart: pdv2Pick_(data, ['cycleStart'], ''),
+      cycleEnd: pdv2Pick_(data, ['cycleEnd'], ''),
+      findingCount: findings.length
+    });
+    return pdv2Success_({ dryRun: true, findingCount: findings.length, updated: 0, skipped: findings.length });
+  }
+
+  findings.forEach(function(finding) {
+    var discordId = pdv2String_(pdv2Pick_(finding, ['targetDiscordId', 'discordId', 'userId'], ''));
+    if (!discordId) {
+      skipped++;
+      return;
+    }
+
+    var status = pdv2Upper_(pdv2Pick_(finding, ['activityStatus'], ''));
+    if (status === 'ERROR') {
+      skipped++;
+      return;
+    }
+
+    var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
+    if (!row) {
+      missing++;
+      return;
+    }
+
+    try {
+      var totalMinutes = Math.round((Number(pdv2Pick_(finding, ['totalSeconds'], 0)) || 0) / 60);
+      var updates = {
+        'Active Status': pdv2ActivityReportStatusLabel_(status),
+        'Latest Change': pdv2Now_()
+      };
+      if (totalMinutes || pdv2Pick_(finding, ['totalHours'], '') !== '') {
+        updates['Current Cycle Hours'] = pdv2FormatMinutesAsHoursMinutes_(totalMinutes) || '00:00';
+      }
+      pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, updates);
+      updated++;
+    } catch (err) {
+      errors.push({ discordId: discordId, error: String(err) });
+    }
+  });
+
+  pdv2Audit_('DISCORD_BOT', 'ACTIVITY_REPORT_DATABASE_UPDATED', pdv2Pick_(data, ['submittedByDiscordId'], ''), 'Database', '', requestId || '', {
+    cycleId: pdv2Pick_(data, ['cycleId'], ''),
+    cycleStart: pdv2Pick_(data, ['cycleStart'], ''),
+    cycleEnd: pdv2Pick_(data, ['cycleEnd'], ''),
+    findingCount: findings.length,
+    updated: updated,
+    skipped: skipped,
+    missing: missing,
+    errors: errors.slice(0, 10)
+  });
+
+  return pdv2Success_({
+    dryRun: false,
+    findingCount: findings.length,
+    updated: updated,
+    skipped: skipped,
+    missing: missing,
+    errors: errors
+  });
+}
+
 function pdv2AppendPatrolLog_(data, requestId) {
   data = data || {};
   var patrolLogId = pdv2GenerateId_('PATROL');

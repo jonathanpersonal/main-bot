@@ -568,7 +568,7 @@ async function handleActivityReport(interaction) {
       }
     }
 
-    // TODO: Build future Google activity handoff/webhook after the local activity workflow is stable.
+    await submitDutyGoogleEvent(interaction, 'ACTIVITY_REPORT_RUN', buildActivityReportGooglePayload(report, cycleRange, dryRun));
     await interaction.editReply({ embeds: [report.embed] });
     console.log('[activity-report] report response sent');
     return;
@@ -1030,6 +1030,40 @@ function getRequestedCycleRange(interaction, activityConfig) {
   if (!cycleStart || !cycleEnd) return { error: 'Cycle dates must be valid and use YYYY-MM-DD format.' };
   if (cycleEnd < cycleStart) return { error: 'Cycle end cannot be before cycle start.' };
   return { cycleStart, cycleEnd };
+}
+
+function buildActivityReportGooglePayload(report, cycleRange, dryRun) {
+  return {
+    dryRun,
+    cycleId: report.cycle.cycleId,
+    cycleStart: formatDateOnly(cycleRange.cycleStart),
+    cycleEnd: formatDateOnly(cycleRange.cycleEnd),
+    summary: {
+      totalOfficers: report.cycle.totalOfficers,
+      loadedOfficerCount: report.cycle.loadedOfficerCount,
+      activeCount: report.cycle.activeCount,
+      semiActiveCount: report.cycle.semiActiveCount,
+      inactiveCount: report.cycle.inactiveCount,
+      loaCount: report.cycle.loaCount,
+      exemptCount: report.cycle.exemptCount,
+      recruitPendingCount: report.cycle.recruitPendingCount,
+      errorCount: report.cycle.errorCount,
+      timedOut: report.cycle.timedOut
+    },
+    findings: report.findings.map((finding) => ({
+      targetDiscordId: finding.userId,
+      rank: finding.rankName,
+      activityStatus: finding.activityStatus,
+      totalSeconds: finding.totalSeconds,
+      totalHours: finding.totalHours,
+      patrolHours: finding.patrolHours,
+      adminHours: finding.adminHours,
+      loaExempt: finding.loaExempt,
+      exemptReason: finding.exemptReason,
+      inactiveStreak: finding.inactiveStreak,
+      notes: finding.notes
+    }))
+  };
 }
 
 async function handleModalSubmit(interaction) {

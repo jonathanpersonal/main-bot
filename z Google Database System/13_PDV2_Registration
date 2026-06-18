@@ -394,7 +394,22 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
       return loaResult;
     }
 
-    var loggingOnlyActions = ['DUTY_TIMECARD_CORRECTION_SUBMITTED','DUTY_TIMECARD_CORRECTION_DENIED','LOA_REQUEST_SUBMITTED','LOA_DENIED','RIDE_ALONG_FEEDBACK','ACTIVITY_REPORT_RUN','ACTIVITY_STATUS_CHECK','TICKET_PANEL_POSTED','TICKET_CREATED','TICKET_CLAIMED','TICKET_RENAMED','TICKET_TRANSFERRED','TICKET_LOCKED_DOWN','TICKET_UNLOCKED','TICKET_TRANSCRIPT_SENT','TICKET_CLOSED','APPEAL_STARTED','APPEAL_SUBMITTED','APPEAL_REVIEW_STARTED','APPEAL_APPROVED','APPEAL_DENIED','APPEAL_CLOSED'];
+    if (actionType === 'ACTIVITY_REPORT_RUN') {
+      var activityReportResult = pdv2ApplyActivityReportToDatabase_(Object.assign({}, payload, data), requestId);
+      pdv2CreateBotAction_({
+        requestId: requestId,
+        actionType: 'ACTIVITY_NOTICE_RESULT',
+        targetDiscordId: submittedOrTargetDiscordId,
+        payload: {
+          actionType: actionType,
+          requestId: requestId,
+          result: activityReportResult
+        }
+      });
+      return activityReportResult;
+    }
+
+    var loggingOnlyActions = ['DUTY_TIMECARD_CORRECTION_SUBMITTED','DUTY_TIMECARD_CORRECTION_DENIED','LOA_REQUEST_SUBMITTED','LOA_DENIED','RIDE_ALONG_FEEDBACK','ACTIVITY_STATUS_CHECK','TICKET_PANEL_POSTED','TICKET_CREATED','TICKET_CLAIMED','TICKET_RENAMED','TICKET_TRANSFERRED','TICKET_LOCKED_DOWN','TICKET_UNLOCKED','TICKET_TRANSCRIPT_SENT','TICKET_CLOSED','APPEAL_STARTED','APPEAL_SUBMITTED','APPEAL_REVIEW_STARTED','APPEAL_APPROVED','APPEAL_DENIED','APPEAL_CLOSED'];
     if (loggingOnlyActions.indexOf(actionType) >= 0) {
       pdv2Audit_(source, actionType, actor, 'BotRequests', requestId, requestId, { targetDiscordId: targetDiscordId, payload: payload });
       pdv2CreateBotAction_({
