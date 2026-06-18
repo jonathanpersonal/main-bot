@@ -33,6 +33,7 @@ const { sendDutyLog } = require('../utils/logUtils');
 const { runLoaDailySync } = require('../utils/loaSync');
 const { buildAppealStartButtonRow } = require('../utils/appealUtils');
 const { issueOfficerStrike } = require('./officerManagement');
+const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 const {
   generateActivityReport,
   calculateOfficerActivity,
@@ -192,6 +193,8 @@ async function handleClockIn(interaction) {
     clockInAt
   });
 
+  await submitDutyGoogleEvent(interaction, 'DUTY_CLOCK_IN', { startedAt: clockInAt.toISOString(), rank: rank?.name || '', patrolType: dutyType.label, type: dutyType.key });
+
   const embed = new EmbedBuilder()
     .setTitle('Clocked In')
     .setColor(DUTY_EMBED_COLOR)
@@ -254,7 +257,16 @@ async function handleClockOut(interaction) {
 
   await sendDutyTimecardLog(interaction, logEmbed);
 
-  // TODO: Send completed timecards to the future Google duty webhook when googleWebhook.enabled is true.
+  await submitDutyGoogleEvent(interaction, 'DUTY_CLOCK_OUT', {
+    startedAt: new Date(timecard.clockInAt).toISOString(),
+    endedAt: new Date(timecard.clockOutAt).toISOString(),
+    durationMinutes: Math.round((timecard.durationSeconds || 0) / 60),
+    durationHours: Math.round(((timecard.durationSeconds || 0) / 3600) * 100) / 100,
+    rank: getRankSafely(interaction.member)?.name || '',
+    patrolType: dutyType?.label || timecard.dutyType,
+    type: timecard.dutyType,
+    timecardId: timecard.timecardId
+  });
 
   const rideAlongReminder = serverConfig?.duty?.rideAlongFeedback?.enabled && ['fto', 'training'].includes(timecard.dutyType)
     ? '\nIf you completed a ride-along with a Probationary Officer, submit the review with `/duty ridealong officer:@officer`.'
@@ -977,6 +989,8 @@ async function handleActivityStatus(interaction) {
     config: serverConfig
   });
 
+  await submitDutyGoogleEvent(interaction, 'ACTIVITY_STATUS_CHECK', { targetDiscordId: officer.id, cycleStart: cycleRange.cycleStart.toISOString(), cycleEnd: cycleRange.cycleEnd.toISOString(), activityStatus: finding.activityStatus });
+
   const embed = new EmbedBuilder()
     .setTitle('Duty Activity Status')
     .setColor(finding.activityStatus === 'ACTIVE' ? DUTY_EMBED_COLOR : finding.activityStatus === 'INACTIVE' ? ERROR_EMBED_COLOR : 0xf1c40f)
@@ -1160,7 +1174,7 @@ async function handleRideAlongFeedbackModalSubmit(interaction) {
   const embed = buildRideAlongFeedbackEmbed(feedback);
   await sendRideAlongFeedbackLog(interaction, embed);
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Ride-along feedback submitted', fields: rideAlongFeedbackLogFields(feedback) });
-  // TODO: Send ride-along feedback to Google training/probation tracking webhook when that integration is added.
+  await submitDutyGoogleEvent(interaction, 'RIDE_ALONG_FEEDBACK', { targetDiscordId: probationaryUserId, rating, generalComments, didWell, improveOn, ridealongDate });
 
   if (feedbackConfig.dmOfficerOnSubmit) {
     const officerUser = await interaction.client.users.fetch(probationaryUserId).catch(() => null);
@@ -1264,7 +1278,7 @@ async function handleCorrectionModalSubmit(interaction) {
   const message = await approvalChannel.send({ embeds: [buildCorrectionEmbed(correction, 'Pending')], components: [buildCorrectionButtons(correction.correction_id, false)] });
   await updateCorrectionApprovalMessage({ correctionId: correction.correction_id, channelId: message.channel.id, messageId: message.id });
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Timecard correction submitted', fields: correctionLogFields(correction, interaction.user.id) });
-  // TODO: Send approved timecard corrections to a future Google handoff integration after that feature is designed.
+  await submitDutyGoogleEvent(interaction, 'DUTY_TIMECARD_CORRECTION_SUBMITTED', { timecardId: timecard.timecard_id, correctionId: correction.correction_id, reason, notes });
   await interaction.reply({ content: `Your timecard correction request has been submitted for staff approval. Correction ID: ${correction.correction_id}`, ephemeral: true });
   return true;
 }
@@ -1295,6 +1309,7 @@ async function handleCorrectionButton(interaction) {
   await notifyCorrectionUser(interaction.client, correction, approved);
   await interaction.message.edit({ embeds: [buildCorrectionEmbed(correction, approved ? 'Approved' : 'Denied')], components: [buildCorrectionButtons(correction.correction_id, true)] }).catch(() => null);
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: approved ? 'Timecard correction approved' : 'Timecard correction denied', fields: correctionLogFields(correction, interaction.user.id) });
+  await submitDutyGoogleEvent(interaction, approved ? 'DUTY_TIMECARD_CORRECTION_APPROVED' : 'DUTY_TIMECARD_CORRECTION_DENIED', { correctionId, timecardId: correction.timecard_id, targetDiscordId: correction.user_id });
   await interaction.editReply(`${approved ? 'Approved' : 'Denied'} ${correction.correction_id}.`);
   return true;
 }
@@ -1480,4 +1495,15 @@ async function replyFriendlyError(interaction) {
   }
 
   return interaction.reply(errorPayload);
+}
+
+async function submitDutyGoogleEvent(interaction, actionType, payload = {}) {
+  return safeSubmitDepartmentEvent({
+    actionType,
+    interaction,
+    actor: interaction.user,
+    targetDiscordId: payload.targetDiscordId || interaction.user.id,
+    targetName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
+    payload: { commandName: '/duty', ...payload }
+  });
 }

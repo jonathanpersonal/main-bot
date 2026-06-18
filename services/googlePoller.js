@@ -12,7 +12,11 @@ const RESULT_ACTION_TYPES = new Set([
   'OFFICER_STATUS_RESULT',
   'DISCIPLINE_RECORD_RESULT',
   'TRAINING_RECORD_RESULT',
-  'ACTIVITY_NOTICE_RESULT'
+  'ACTIVITY_NOTICE_RESULT',
+  'DUTY_RECORD_RESULT',
+  'TICKET_RECORD_RESULT',
+  'APPEAL_RECORD_RESULT',
+  'GENERIC_LOG_RESULT'
 ]);
 
 let pollerInterval = null;
@@ -182,6 +186,16 @@ async function processBotAction(client, action, actionType) {
     const nicknameResult = await updateMemberCallsignNickname(client, action, payload);
     console.log('Google officer management result handled:', nicknameResult);
     return nicknameResult;
+  }
+
+  if (actionType === 'TRAINING_RECORD_RESULT') {
+    const result = payload.result || {};
+    const callsign = result.callsign || result.database?.record?.['Current Callsign'];
+    if ((payload.actionType === 'TRAINING_COMPLETE' || payload.actionType === 'TRAINING_PASSED') && !callsign) {
+      console.warn('Google training pass recorded without callsign:', payload);
+    }
+    console.log(`Google result action received: ${actionType}`, payload);
+    return { handledAt: new Date().toISOString(), handledBy: 'googlePoller', callsignPresent: !!callsign };
   }
 
   if (RESULT_ACTION_TYPES.has(actionType)) {

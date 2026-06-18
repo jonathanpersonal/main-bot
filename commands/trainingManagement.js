@@ -195,7 +195,7 @@ async function handleTrainingConfirm(interaction) {
   const dmStatus = await sendTrainingDm({ officerUser, serverConfig, flow, outcomeId, outcomeConfig: cfg, details: state.details, roleResult });
   const logFn = flow === 'app' ? sendApplicationReviewLog : sendCadetTrainingLog;
   await logFn({ guild: interaction.guild, serverConfig, officerUser, staffUser: interaction.user, outcomeId, outcomeLabel: cfg.label || outcomeId, details: state.details, roleResult, dmStatus, ftoCommandMentions: buildFtoMentions(serverConfig, cfg), changedAt: new Date() });
-  const googleResult = await submitAcceptedForTrainingEvent({
+  const googleResult = await submitTrainingOutcomeEvent({
     interaction,
     officerUser,
     officerMember,
@@ -217,16 +217,12 @@ async function handleTrainingConfirm(interaction) {
   return true;
 }
 
-async function submitAcceptedForTrainingEvent({ interaction, officerUser, officerMember, flow, outcomeId, outcomeConfig, details, roleResult, dmStatus }) {
-  if (!isAcceptedForTrainingDecision(flow, outcomeId, outcomeConfig)) {
-    return null;
-  }
-
+async function submitTrainingOutcomeEvent({ interaction, officerUser, officerMember, flow, outcomeId, outcomeConfig, details, roleResult, dmStatus }) {
   const acceptedAt = new Date().toISOString();
   const cleanDisplayName = cleanName(officerMember?.displayName || officerUser.globalName || officerUser.username);
 
   return safeSubmitDepartmentEvent({
-    actionType: 'APPLICATION_ACCEPTED_FOR_TRAINING',
+    actionType: getTrainingGoogleActionType(flow, outcomeId, outcomeConfig),
     interaction,
     actor: interaction.user,
     target: officerMember || officerUser,
@@ -235,7 +231,7 @@ async function submitAcceptedForTrainingEvent({ interaction, officerUser, office
     targetName: cleanDisplayName || officerMember?.displayName || officerUser.username,
     reason: firstUseful(details.reason, details.notes, details.comments),
     payload: {
-      flow: 'accepted_for_training',
+      flow,
       decisionId: outcomeId,
       decisionLabel: outcomeConfig.label || outcomeId,
       officerDiscordId: officerUser.id,
@@ -249,14 +245,14 @@ async function submitAcceptedForTrainingEvent({ interaction, officerUser, office
       roleResult,
       dmSent: dmStatus === 'Yes',
       acceptedAt,
-      trainingType: 'Application Accepted For Training',
-      status: 'Pending Training',
+      trainingType: flow === 'cadet' ? 'Cadet Training' : 'Application Review',
+      status: getTrainingStatus(flow, outcomeId, outcomeConfig),
       cadetTracker: {
         discordId: officerUser.id,
         name: cleanDisplayName || officerMember?.displayName || officerUser.username,
         dateJoined: acceptedAt,
         trained: false,
-        status: 'Pending Training'
+        status: getTrainingStatus(flow, outcomeId, outcomeConfig)
       }
     }
   });
@@ -339,3 +335,6 @@ function isAcceptedForTrainingDecision(flow, outcomeId, cfg = {}) { return flow 
 function firstUseful(...values) { return values.find((value) => value && value !== 'None provided.') || null; }
 function cleanName(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
 function formatGoogleResult(result) { if (!result) return 'Not submitted'; if (result.ok) return result.requestId ? `Submitted (${result.requestId})` : 'Submitted'; if (result.pending) return 'Pending; Google request timed out'; if (result.busy) return 'Pending; Google was busy'; return `Failed (${result.error?.message || 'see logs'})`; }
+
+function getTrainingGoogleActionType(flow, outcomeId, cfg = {}) { if (cfg.googleActionType) return cfg.googleActionType; if (flow === 'app') return isAcceptedForTrainingDecision(flow, outcomeId, cfg) ? 'APPLICATION_ACCEPTED_FOR_TRAINING' : 'APPLICATION_REVIEW'; if (outcomeId === 'pass') return 'TRAINING_COMPLETE'; if (outcomeId === 'fail') return 'TRAINING_FAILED'; return 'CADET_TRAINING'; }
+function getTrainingStatus(flow, outcomeId, cfg = {}) { if (cfg.googleStatus) return cfg.googleStatus; if (flow === 'app' && isAcceptedForTrainingDecision(flow, outcomeId, cfg)) return 'Pending Training'; if (outcomeId === 'pass') return 'PASSED'; if (outcomeId === 'fail') return 'FAILED'; return cfg.label || outcomeId || 'Recorded'; }

@@ -115,7 +115,7 @@ function pdv2FormatSheet_(sh) {
 function pdv2HeaderMap_(sh) {
   var lastCol = sh.getLastColumn();
   if (lastCol < 1) return {};
-  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  var headers = sh.getRange(1, 1, 1, lastCol).getDisplayValues()[0];
   var map = {};
   headers.forEach(function(header, index) {
     var h = pdv2String_(header);

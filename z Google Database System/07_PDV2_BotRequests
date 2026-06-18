@@ -219,7 +219,8 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
       actionType === 'CADET_TRAINING' ||
       actionType === 'APPLICATION_ACCEPTED_FOR_TRAINING' ||
       actionType === 'CADET_ACCEPTED_FOR_TRAINING' ||
-      actionType === 'TRAINING_PASSED'
+      actionType === 'TRAINING_PASSED' ||
+      actionType === 'TRAINING_FAILED'
     ) {
       var trainingData = Object.assign({}, payload, data, { actionType: actionType });
       var trainingResult = pdv2AppendTrainingRecord_(trainingData, requestId);
@@ -261,8 +262,17 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
       return combinedTrainingResult;
     }
 
-    if (actionType === 'PATROL_LOG' || actionType === 'DUTY_PATROL_LOG') {
-      return pdv2AppendPatrolLog_(data, requestId);
+    if (actionType === 'PATROL_LOG' || actionType === 'DUTY_PATROL_LOG' || actionType === 'DUTY_CLOCK_IN' || actionType === 'DUTY_CLOCK_OUT') {
+      var dutyResult = pdv2AppendPatrolLog_(Object.assign({}, payload, data), requestId);
+      pdv2CreateBotAction_({ requestId: requestId, actionType: 'DUTY_RECORD_RESULT', targetDiscordId: targetDiscordId || submittedOrTargetDiscordId, payload: { actionType: actionType, requestId: requestId, result: dutyResult } });
+      return dutyResult;
+    }
+
+    var loggingOnlyActions = ['DUTY_TIMECARD_CORRECTION_SUBMITTED','DUTY_TIMECARD_CORRECTION_APPROVED','DUTY_TIMECARD_CORRECTION_DENIED','LOA_REQUEST_SUBMITTED','LOA_APPROVED','LOA_DENIED','LOA_SYNC_RUN','RIDE_ALONG_FEEDBACK','ACTIVITY_REPORT_RUN','ACTIVITY_STATUS_CHECK','TICKET_PANEL_POSTED','TICKET_CREATED','TICKET_CLAIMED','TICKET_RENAMED','TICKET_TRANSFERRED','TICKET_LOCKED_DOWN','TICKET_UNLOCKED','TICKET_TRANSCRIPT_SENT','TICKET_CLOSED','APPEAL_STARTED','APPEAL_SUBMITTED','APPEAL_REVIEW_STARTED','APPEAL_APPROVED','APPEAL_DENIED','APPEAL_CLOSED'];
+    if (loggingOnlyActions.indexOf(actionType) >= 0) {
+      pdv2Audit_(source, actionType, actor, 'BotRequests', requestId, requestId, { targetDiscordId: targetDiscordId, payload: payload });
+      pdv2CreateBotAction_({ requestId: requestId, actionType: actionType.indexOf('TICKET_') === 0 ? 'TICKET_RECORD_RESULT' : actionType.indexOf('APPEAL_') === 0 ? 'APPEAL_RECORD_RESULT' : 'GENERIC_LOG_RESULT', targetDiscordId: submittedOrTargetDiscordId, payload: { message: 'Request stored as logged event.', actionType: actionType, requestId: requestId } });
+      return pdv2Success_({ message: 'Request stored as logged event.' });
     }
 
     if (
@@ -298,10 +308,10 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
 
     pdv2CreateBotAction_({
       requestId: requestId,
-      actionType: 'GENERIC_REQUEST_RECEIVED',
+      actionType: 'GENERIC_LOG_RESULT',
       targetDiscordId: submittedOrTargetDiscordId,
       payload: {
-        message: 'Google received an unhandled request type. It was stored but no workflow has been attached yet.',
+        message: 'Google received and logged an unhandled request type.',
         actionType: actionType,
         requestId: requestId
       }

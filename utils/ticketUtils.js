@@ -15,6 +15,7 @@ const {
 const { getServerConfig } = require('./configUtils');
 const { sendTicketLog: sendTicketLogEmbed } = require('./logUtils');
 const { generateTextTranscript } = require('./transcriptUtils');
+const { safeSubmitDepartmentEvent } = require('./googleDepartmentEvents');
 
 const METADATA_PREFIX = 'ticket:';
 
@@ -298,6 +299,7 @@ async function createTicket({ guild, typeId, targetUser, createdBy, reason, meta
     system ? 'System reinstatement ticket created' : 'Ticket created',
     `${type.label} ticket: ${channel}\nUser: ${targetUser}\nCreated by: ${createdBy || targetUser}`
   );
+  await submitTicketGoogleEvent({ interaction, guild, actionType: 'TICKET_CREATED', actor: createdBy || targetUser, targetUser, channel, metadata: ticketMetadata, extra: { typeId: type.id, typeLabel: type.label, system, reason } });
 
   if (interaction) {
     await interaction.reply({ content: `Your ticket has been created: ${channel}`, ephemeral: true });
@@ -370,6 +372,7 @@ async function claimTicket(interaction) {
 
   await interaction.reply({ content: `Ticket claimed by ${interaction.user}.` });
   await sendTicketLog(interaction.guild, 'Ticket claimed', `${interaction.channel} claimed by ${interaction.user}\nClaimed by ID: ${nextMetadata.claimedById}`);
+  await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_CLAIMED', metadata: nextMetadata });
 }
 
 async function renameTicket(interaction) {
@@ -396,6 +399,7 @@ async function handleRenameModal(interaction) {
   await interaction.channel.setName(safeName(interaction.fields.getTextInputValue('name')));
   await interaction.reply({ content: 'Ticket renamed.', ephemeral: true });
   await sendTicketLog(interaction.guild, 'Ticket renamed', `${interaction.channel} renamed by ${interaction.user}\nOld: ${oldName}\nNew: ${interaction.channel.name}`);
+  await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_RENAMED', metadata: readTicketMetadata(interaction.channel), extra: { oldName, newName: interaction.channel.name } });
 }
 
 async function transferTicket(interaction) {
@@ -449,6 +453,7 @@ async function handleTransferSelect(interaction) {
   await interaction.channel.setName(`ticket-${shortType(type)}-${safeName(interaction.channel.name.replace(/^closed-/, '').replace(/^ticket-[^-]+-/, ''))}`.slice(0, 95));
   await interaction.update({ content: `Ticket transferred to ${type.label}.`, components: [] });
   await sendTicketLog(interaction.guild, 'Ticket transferred', `${interaction.channel} transferred to ${type.label} by ${interaction.user}`);
+  await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_TRANSFERRED', metadata: nextMetadata, extra: { typeId: type.id, typeLabel: type.label } });
 }
 
 async function lockTicket(interaction) {
@@ -520,6 +525,7 @@ async function handleLockdownSelect(interaction) {
     components: type ? controls(type, true) : []
   });
   await sendTicketLog(interaction.guild, 'Ticket locked down', `${interaction.channel} locked by ${interaction.user}\nPreset: ${preset.label}`);
+  await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_LOCKED_DOWN', metadata: nextMetadata, extra: { lockdownPresetId: preset.id, lockdownPresetLabel: preset.label } });
 }
 
 async function unlockTicket(interaction) {
@@ -549,6 +555,7 @@ async function unlockTicket(interaction) {
   await interaction.reply({ content: 'Ticket unlocked and normal permissions restored.', ephemeral: true });
   await interaction.channel.send({ content: 'Ticket unlocked and normal permissions restored.', components: controls(type, false) });
   await sendTicketLog(interaction.guild, 'Ticket unlocked', `${interaction.channel} unlocked by ${interaction.user}`);
+  await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_UNLOCKED', metadata: nextMetadata });
 }
 
 async function closeTicket(interaction) {
@@ -599,11 +606,13 @@ async function handleCloseModal(interaction) {
           files: [file]
         });
         await sendTicketLog(interaction.guild, 'Ticket transcript sent', `Transcript sent for ${interaction.channel} to ${transcriptChannel}.`);
+        await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_TRANSCRIPT_SENT', metadata: closedMetadata, extra: { transcriptChannelId: transcriptChannel.id } });
       }
     }
   }
 
   await sendTicketLog(interaction.guild, 'Ticket closed', `${interaction.channel} closed by ${interaction.user}\nReason: ${reason}`);
+  await submitTicketGoogleEvent({ interaction, actionType: 'TICKET_CLOSED', metadata: closedMetadata, extra: { reason } });
 
   if (cfg.closeBehavior === 'delete') {
     await interaction.editReply('Ticket closed. Deleting channel shortly.');
@@ -623,6 +632,19 @@ async function handleCloseModal(interaction) {
     openerCanSend: false
   }));
   await interaction.editReply('Ticket closed and archived.');
+}
+
+async function submitTicketGoogleEvent({ interaction, guild, actionType, actor, targetUser, channel, metadata = {}, extra = {} }) {
+  return safeSubmitDepartmentEvent({
+    actionType,
+    interaction,
+    guildId: guild?.id || interaction?.guildId,
+    channelId: channel?.id || interaction?.channelId,
+    actor: actor || interaction?.user,
+    targetDiscordId: targetUser?.id || metadata.openerId,
+    targetName: targetUser?.username || null,
+    payload: { ticketChannelId: channel?.id || interaction?.channelId, ticketChannelName: channel?.name || interaction?.channel?.name, metadata, ...extra }
+  });
 }
 
 module.exports = {

@@ -1,5 +1,6 @@
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const { canManageTickets, getListedTicketTypes, getTicketConfig } = require('../utils/ticketUtils');
+const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -38,7 +39,8 @@ module.exports = {
         .setStyle(ButtonStyle.Primary))));
     }
 
-    await interaction.channel.send({ embeds: [embed], components: rows });
+    const panelMessage = await interaction.channel.send({ embeds: [embed], components: rows });
+    await safeSubmitDepartmentEvent({ actionType: 'TICKET_PANEL_POSTED', interaction, actor: interaction.user, payload: { channelId: interaction.channelId, messageId: panelMessage.id, ticketTypes: types.map((type) => type.id) } });
     await interaction.reply({ content: 'Ticket panel posted.', ephemeral: true });
   }
 };

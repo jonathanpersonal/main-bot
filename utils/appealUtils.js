@@ -12,6 +12,7 @@ const {
 const { getServerConfig } = require('./configUtils');
 const { sendAppealLog } = require('./logUtils');
 const { createSystemTicket } = require('./ticketUtils');
+const { safeSubmitDepartmentEvent } = require('./googleDepartmentEvents');
 
 const APPEAL_TYPES = {
   termination: {
@@ -348,6 +349,8 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
     await safeThreadSend(thread, 'DM delivery failed for the appeal submission confirmation.');
   }
 
+  await safeSubmitAppealGoogleEvent({ interaction, actionType: 'APPEAL_SUBMITTED', appealType, appealId, officerId, extra: { caseId, threadId: thread.id, answers } });
+
   await sendAppealLog({
     guild,
     serverConfig,
@@ -399,6 +402,8 @@ async function markAppealUnderReview({ interaction, serverConfig, appealType, of
   if (!dmSent) {
     await safeThreadSend(interaction.channel, 'DM delivery failed for the under review notification.');
   }
+
+  await safeSubmitAppealGoogleEvent({ interaction, actionType: 'APPEAL_REVIEW_STARTED', appealType, appealId, officerId, extra: { threadId: interaction.channelId } });
 
   await sendAppealLog({
     guild: interaction.guild,
@@ -688,6 +693,8 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     strikeRemovalResult ? `Strike role action: ${strikeRemovalResult.message}` : null
   ].filter(Boolean).join('\n');
 
+  await safeSubmitAppealGoogleEvent({ interaction, actionType: isApproval ? 'APPEAL_APPROVED' : 'APPEAL_DENIED', appealType, appealId, officerId, extra: { reason, comments, nextSteps, canReapply, finalStatus } });
+
   await sendAppealLog({
     guild: interaction.guild,
     serverConfig,
@@ -707,6 +714,16 @@ async function submitDecision({ interaction, serverConfig, appealType, officerId
     formatCloseResultForReply(closeResult)
   ].filter(Boolean).join('\n'));
   return true;
+}
+
+async function safeSubmitAppealGoogleEvent({ interaction, actionType, appealType, appealId, officerId, extra = {} }) {
+  return safeSubmitDepartmentEvent({
+    actionType,
+    interaction,
+    actor: interaction.user,
+    targetDiscordId: officerId,
+    payload: { appealType, appealId, channelId: interaction.channelId, ...extra }
+  });
 }
 
 function buildFinalDecisionSummary({ decision, staffUser, reason, comments, nextSteps, canReapply, appealType, strikeRemovalResult }) {
