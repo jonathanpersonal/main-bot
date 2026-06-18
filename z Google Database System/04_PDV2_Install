@@ -12,20 +12,32 @@ function pdv2InstallOrRepairSystem() {
       checked.push(sheetName);
     });
 
-    pdv2SeedSystemConfig_();
-    pdv2SeedStarterConfig_();
-    pdv2SeedInitialStaffAccess_();
+    var systemConfigSeed = pdv2SeedSystemConfig_();
+    var starterConfigSeed = pdv2SeedStarterConfig_();
+    var staffAccessSeed = pdv2SeedInitialStaffAccess_();
     var rosterOptionRepair = pdv2RepairRosterOptionHeaderFormulas_();
     var activityNoticeRepair = pdv2RepairActivityNoticesHeaders_();
 
     pdv2Log_('INFO', 'INSTALL', 'SYSTEM_REPAIRED', 'Install/repair completed.', { sheetsChecked: checked.length });
     pdv2Audit_('SHEET_MENU', 'SYSTEM_REPAIRED', Session.getActiveUser().getEmail(), 'System', 'PDV2', '', {
       sheetsChecked: checked,
+      systemConfigSeed: systemConfigSeed,
+      starterConfigSeed: starterConfigSeed,
+      staffAccessSeed: staffAccessSeed,
       rosterOptionRepair: rosterOptionRepair,
       activityNoticeRepair: activityNoticeRepair
     });
 
-    return { ok: true, version: PDV2.VERSION, sheetsChecked: checked, rosterOptionRepair: rosterOptionRepair, activityNoticeRepair: activityNoticeRepair };
+    return {
+      ok: true,
+      version: PDV2.VERSION,
+      sheetsChecked: checked,
+      systemConfigSeed: systemConfigSeed,
+      starterConfigSeed: starterConfigSeed,
+      staffAccessSeed: staffAccessSeed,
+      rosterOptionRepair: rosterOptionRepair,
+      activityNoticeRepair: activityNoticeRepair
+    };
   });
 }
 
@@ -56,30 +68,8 @@ function pdv2SeedSystemConfig_() {
     ['HOURS_CYCLE_END_DATE', '', 'Current cycle end date when script-managed hours are enabled.'],
     ['ACTIVITY_STATUS_UPDATE_ON_PATROL_LOG', 'TRUE', 'TRUE/FALSE toggle to update Database Active Status when patrol hours change.'],
     ['ACTIVITY_REPORT_AUTO_STRIKE_1_ENABLED', 'TRUE', 'TRUE/FALSE toggle to create ActivityNotices Strike 1 from live activity report inactive-streak-1 findings.'],
-    ['ACTIVITY_ACTIVE_HOURS_DEFAULT', '2.5', 'Default current-cycle hours required for Active status when no rank-specific threshold is configured.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT', '2', 'Default current-cycle hours required for Semi Active status when no rank-specific threshold is configured.'],
-    ['ACTIVITY_EXEMPT_RANKS', 'Chief, Deputy Chief, Commander', 'Comma/newline separated rank names that should show Exempt for activity.'],
-    ['ACTIVITY_NEW_RANKS', 'Recruit, Cadet', 'Comma/newline separated rank names that should show New for activity/training pending.'],
-    ['ACTIVITY_ACTIVE_HOURS_CAPTAIN', '10', 'Rank-specific Active threshold for Captain.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_CAPTAIN', '4', 'Rank-specific Semi Active threshold for Captain.'],
-    ['ACTIVITY_ACTIVE_HOURS_LIEUTENANT', '10', 'Rank-specific Active threshold for Lieutenant.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_LIEUTENANT', '4', 'Rank-specific Semi Active threshold for Lieutenant.'],
-    ['ACTIVITY_ACTIVE_HOURS_STAFF_SERGEANT', '8', 'Rank-specific Active threshold for Staff Sergeant.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_STAFF_SERGEANT', '3', 'Rank-specific Semi Active threshold for Staff Sergeant.'],
-    ['ACTIVITY_ACTIVE_HOURS_SERGEANT', '8', 'Rank-specific Active threshold for Sergeant.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_SERGEANT', '3', 'Rank-specific Semi Active threshold for Sergeant.'],
-    ['ACTIVITY_ACTIVE_HOURS_CORPORAL', '7.5', 'Rank-specific Active threshold for Corporal.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_CORPORAL', '3', 'Rank-specific Semi Active threshold for Corporal.'],
-    ['ACTIVITY_ACTIVE_HOURS_LEAD_OFFICER', '6', 'Rank-specific Active threshold for Lead Officer.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_LEAD_OFFICER', '3', 'Rank-specific Semi Active threshold for Lead Officer.'],
-    ['ACTIVITY_ACTIVE_HOURS_SENIOR_OFFICER', '3.5', 'Rank-specific Active threshold for Senior Officer.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_SENIOR_OFFICER', '2', 'Rank-specific Semi Active threshold for Senior Officer.'],
-    ['ACTIVITY_ACTIVE_HOURS_OFFICER_II', '3.5', 'Rank-specific Active threshold for Officer II.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_OFFICER_II', '2', 'Rank-specific Semi Active threshold for Officer II.'],
-    ['ACTIVITY_ACTIVE_HOURS_PROBATIONARY_OFFICER', '2.5', 'Rank-specific Active threshold for Probationary Officer.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_PROBATIONARY_OFFICER', '2', 'Rank-specific Semi Active threshold for Probationary Officer.'],
-    ['ACTIVITY_ACTIVE_HOURS_OFFICER', '2.5', 'Rank-specific Active threshold for Officer.'],
-    ['ACTIVITY_SEMI_ACTIVE_HOURS_OFFICER', '2', 'Rank-specific Semi Active threshold for Officer.'],
+    ['ACTIVITY_ACTIVE_HOURS_DEFAULT', '2.5', 'Default current-cycle hours required for Active status when the Ranks sheet value is blank.'],
+    ['ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT', '2', 'Default current-cycle hours required for Semi Active status when the Ranks sheet value is blank.'],
     ['DIVISION_DATABASE_ENABLED', 'FALSE', 'Reserved future toggle for Apps Script-managed linked division databases.'],
     ['DIVISION_DATABASE_SPREADSHEET_ID', '', 'Reserved future linked division spreadsheet ID. Do not make the bot call this directly.'],
     ['DIVISION_DATABASE_MODE', 'MAIN_ONLY', 'Reserved future division database routing mode.'],
@@ -93,9 +83,34 @@ function pdv2SeedSystemConfig_() {
     ['CADET_TRAINED_DEFAULT', 'FALSE', 'Default Trained? value for new CadetTracker rows.']
   ];
 
-  rows.forEach(function(row) {
-    var existing = pdv2FindRowByValue_(PDV2.SHEETS.SYSTEM_CONFIG, 'Key', row[0]);
-    if (!existing) pdv2SetConfigValue_(row[0], row[1], row[2]);
+  var existingKeys = {};
+  pdv2ListRows_(PDV2.SHEETS.SYSTEM_CONFIG).forEach(function(row) {
+    existingKeys[pdv2Upper_(row.Key)] = true;
+  });
+
+  var missingRows = rows
+    .filter(function(row) { return !existingKeys[pdv2Upper_(row[0])]; })
+    .map(function(row) {
+      return {
+        'Key': row[0],
+        'Value': row[1],
+        'Description': row[2] || '',
+        'Updated At': pdv2Now_()
+      };
+    });
+
+  pdv2AppendObjects_(PDV2.SHEETS.SYSTEM_CONFIG, missingRows);
+  var legacyActivityRowsRemoved = pdv2RemoveLegacyActivitySystemConfig_();
+  return { added: missingRows.length, legacyActivityRowsRemoved: legacyActivityRowsRemoved };
+}
+
+function pdv2RemoveLegacyActivitySystemConfig_() {
+  return pdv2DeleteRowsMatching_(PDV2.SHEETS.SYSTEM_CONFIG, function(row) {
+    var key = pdv2Upper_(row.Key);
+    var isLegacyRankHours = (/^ACTIVITY_ACTIVE_HOURS_/.test(key) && key !== 'ACTIVITY_ACTIVE_HOURS_DEFAULT') ||
+      (/^ACTIVITY_SEMI_ACTIVE_HOURS_/.test(key) && key !== 'ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT');
+    var isLegacyRankList = key === 'ACTIVITY_EXEMPT_RANKS' || key === 'ACTIVITY_NEW_RANKS';
+    return isLegacyRankHours || isLegacyRankList;
   });
 }
 
@@ -128,9 +143,15 @@ function pdv2SeedStarterConfig_() {
     ['chief', 'Chief', 90, 'FALSE']
   ];
 
+  var existingRankKeys = {};
+  pdv2ListRows_(PDV2.SHEETS.RANKS).forEach(function(row) {
+    existingRankKeys[pdv2String_(row['Rank Key'])] = true;
+  });
+
+  var missingRankRows = [];
   starterRanks.forEach(function(rank) {
-    if (!pdv2FindRowByValue_(PDV2.SHEETS.RANKS, 'Rank Key', rank[0])) {
-      pdv2AppendObject_(PDV2.SHEETS.RANKS, {
+    if (!existingRankKeys[pdv2String_(rank[0])]) {
+      missingRankRows.push({
         'Rank Key': rank[0],
         'Rank Name': rank[1],
         'Rank Order': rank[2],
@@ -139,12 +160,17 @@ function pdv2SeedStarterConfig_() {
         'Active': 'TRUE',
         'Discord Role ID': '',
         'Permission Role ID': '',
+        'Activity Active Hours': '',
+        'Activity Semi Active Hours': '',
+        'Activity Exempt': '',
+        'Activity Cadet': '',
         'Notes': 'Starter rank. Edit role IDs/config for each copied server.',
         'Updated At': pdv2Now_()
       });
       ranksAdded++;
     }
   });
+  pdv2AppendObjects_(PDV2.SHEETS.RANKS, missingRankRows);
 
   pdv2SeedDivisionAndCertificationConfig_();
   pdv2SeedDefaultRosterOptions_();

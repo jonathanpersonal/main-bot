@@ -46,7 +46,16 @@ function onOpen() {
 
 function pdv2MenuInstallRepair() {
   var result = pdv2InstallOrRepairSystem();
-  SpreadsheetApp.getUi().alert('Install / repair complete.\n\nSheets checked: ' + result.sheetsChecked.length);
+  SpreadsheetApp.getUi().alert([
+    'Install / repair complete.',
+    '',
+    'Sheets checked: ' + result.sheetsChecked.length,
+    'SystemConfig rows added: ' + ((result.systemConfigSeed && result.systemConfigSeed.added) || 0),
+    'Legacy activity config rows removed: ' + ((result.systemConfigSeed && result.systemConfigSeed.legacyActivityRowsRemoved) || 0),
+    'Starter ranks added: ' + ((result.starterConfigSeed && result.starterConfigSeed.ranksAdded) || 0),
+    '',
+    'If headers were separated by blank columns, they were compacted during this repair.'
+  ].join('\n'));
 }
 
 function pdv2MenuRefreshFormatting() {

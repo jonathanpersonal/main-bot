@@ -218,6 +218,10 @@ var PDV2 = {
       'Active',
       'Discord Role ID',
       'Permission Role ID',
+      'Activity Active Hours',
+      'Activity Semi Active Hours',
+      'Activity Exempt',
+      'Activity Cadet',
       'Notes',
       'Updated At'
     ],

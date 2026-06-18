@@ -24,12 +24,15 @@ function pdv2EnsureSheet_(sheetName) {
   var sh = pdv2GetSheet_(sheetName);
   var headers = pdv2HeadersForSheet_(sheetName);
   if (headers.length) pdv2EnsureHeaders_(sh, headers);
+  pdv2ApplySheetControls_(sh);
   pdv2FormatSheet_(sh);
   return sh;
 }
 
 function pdv2EnsureHeaders_(sh, headers) {
   if (!headers || !headers.length) return;
+
+  pdv2DeleteEmptyHeaderGapColumns_(sh);
 
   var lastCol = Math.max(sh.getLastColumn(), headers.length);
   var current = lastCol > 0 ? sh.getRange(1, 1, 1, lastCol).getValues()[0].map(pdv2String_) : [];
@@ -51,6 +54,58 @@ function pdv2EnsureHeaders_(sh, headers) {
   }
 
   if (changed) pdv2FormatSheet_(sh);
+}
+
+function pdv2DeleteEmptyHeaderGapColumns_(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) return 0;
+
+  var lastRow = Math.max(sh.getLastRow(), 1);
+  var values = sh.getRange(1, 1, lastRow, lastCol).getValues();
+  var ranges = [];
+  var start = null;
+  var end = null;
+
+  for (var col = lastCol; col >= 1; col--) {
+    var header = pdv2String_(values[0][col - 1]);
+    var hasData = false;
+    for (var row = 1; row < values.length; row++) {
+      if (pdv2String_(values[row][col - 1]) !== '') {
+        hasData = true;
+        break;
+      }
+    }
+
+    if (!header && !hasData) {
+      if (end === null) end = col;
+      start = col;
+    } else if (end !== null) {
+      ranges.push([start, end - start + 1]);
+      start = null;
+      end = null;
+    }
+  }
+
+  if (end !== null) ranges.push([start, end - start + 1]);
+
+  ranges.forEach(function(range) {
+    sh.deleteColumns(range[0], range[1]);
+  });
+
+  return ranges.reduce(function(total, range) { return total + range[1]; }, 0);
+}
+
+function pdv2ApplySheetControls_(sh) {
+  if (!sh || sh.getName() !== PDV2.SHEETS.RANKS) return;
+
+  var map = pdv2HeaderMap_(sh);
+  ['Activity Exempt', 'Activity Cadet'].forEach(function(header) {
+    var column = map[header];
+    if (!column) return;
+
+    var rowCount = Math.max(sh.getMaxRows() - 1, 1);
+    sh.getRange(2, column, rowCount, 1).insertCheckboxes('TRUE', 'FALSE');
+  });
 }
 
 function pdv2ColumnHasDataBelowHeader_(sh, column) {
@@ -145,6 +200,24 @@ function pdv2AppendObject_(sheetName, obj) {
   });
   sh.appendRow(row);
   return sh.getLastRow();
+}
+
+function pdv2AppendObjects_(sheetName, objects) {
+  objects = objects || [];
+  if (!objects.length) return [];
+
+  var sh = pdv2EnsureSheet_(sheetName);
+  var map = pdv2HeaderMap_(sh);
+  var headers = Object.keys(map).sort(function(a, b) { return map[a] - map[b]; });
+  var rows = objects.map(function(obj) {
+    return headers.map(function(header) {
+      return obj && obj.hasOwnProperty(header) ? obj[header] : '';
+    });
+  });
+  var startRow = sh.getLastRow() + 1;
+  sh.getRange(startRow, 1, rows.length, headers.length).setValues(rows);
+
+  return rows.map(function(_, index) { return startRow + index; });
 }
 
 function pdv2UpdateRowObject_(sheetName, rowNumber, updates) {

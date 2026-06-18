@@ -162,22 +162,38 @@ function pdv2SumPatrolMinutesForCycle_(discordId, cycleKey) {
   }, 0);
 }
 
-function pdv2ConfigList_(key, defaultValue) {
-  return pdv2String_(pdv2GetConfigValue_(key, defaultValue || ''))
-    .split(/[\n,]+/)
-    .map(function(item) { return pdv2String_(item).toLowerCase(); })
-    .filter(function(item) { return item; });
+function pdv2NormalizeRankForActivity_(rank) {
+  return pdv2String_(rank)
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
-function pdv2ActivityConfigKeyForRank_(prefix, rank) {
-  return prefix + '_' + pdv2String_(rank)
-    .replace(/[^A-Za-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toUpperCase();
+function pdv2FindActivityRankConfig_(rank) {
+  var normalizedRank = pdv2NormalizeRankForActivity_(rank);
+  if (!normalizedRank) return null;
+
+  var rows = pdv2ListRows_(PDV2.SHEETS.RANKS);
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var rankName = pdv2NormalizeRankForActivity_(row['Rank Name']);
+    var rankKey = pdv2NormalizeRankForActivity_(row['Rank Key']);
+    if (rankName === normalizedRank || rankKey === normalizedRank) return row;
+  }
+
+  return null;
 }
 
-function pdv2GetActivityHoursThreshold_(prefix, rank, defaultKey, defaultValue) {
-  var rankValue = pdv2GetConfigValue_(pdv2ActivityConfigKeyForRank_(prefix, rank), '');
+function pdv2RankActivityToggle_(rankConfig, headerName) {
+  if (!rankConfig || !rankConfig.hasOwnProperty(headerName)) return null;
+  var raw = pdv2String_(rankConfig[headerName]);
+  if (raw === '') return null;
+  return pdv2Bool_(raw, false);
+}
+
+function pdv2GetRankActivityHoursThreshold_(rankConfig, headerName, defaultKey, defaultValue) {
+  var rankValue = rankConfig ? rankConfig[headerName] : '';
   if (pdv2String_(rankValue) !== '') return Number(rankValue) || 0;
   return Number(pdv2GetConfigValue_(defaultKey, defaultValue)) || 0;
 }
@@ -189,16 +205,16 @@ function pdv2CalculateActivityStatusFromHours_(record, totalMinutes, options) {
   if (options.preserveLoa !== false && currentStatus.toLowerCase() === 'loa') return 'LOA';
 
   var rank = pdv2String_(record.Rank || record['Rank']);
-  var rankLower = rank.toLowerCase();
-  var exemptRanks = pdv2ConfigList_('ACTIVITY_EXEMPT_RANKS', 'Chief, Deputy Chief, Commander');
-  if (exemptRanks.indexOf(rankLower) >= 0) return 'Exempt';
+  var rankConfig = pdv2FindActivityRankConfig_(rank);
+  var exemptToggle = pdv2RankActivityToggle_(rankConfig, 'Activity Exempt');
+  if (exemptToggle === true) return 'Exempt';
 
-  var newRanks = pdv2ConfigList_('ACTIVITY_NEW_RANKS', 'Recruit, Cadet');
-  if (newRanks.indexOf(rankLower) >= 0) return 'New';
+  var cadetToggle = pdv2RankActivityToggle_(rankConfig, 'Activity Cadet');
+  if (cadetToggle === true) return 'New';
 
   var totalHours = (Number(totalMinutes) || 0) / 60;
-  var activeHours = pdv2GetActivityHoursThreshold_('ACTIVITY_ACTIVE_HOURS', rank, 'ACTIVITY_ACTIVE_HOURS_DEFAULT', '2.5');
-  var semiActiveHours = pdv2GetActivityHoursThreshold_('ACTIVITY_SEMI_ACTIVE_HOURS', rank, 'ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT', '2');
+  var activeHours = pdv2GetRankActivityHoursThreshold_(rankConfig, 'Activity Active Hours', 'ACTIVITY_ACTIVE_HOURS_DEFAULT', '2.5');
+  var semiActiveHours = pdv2GetRankActivityHoursThreshold_(rankConfig, 'Activity Semi Active Hours', 'ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT', '2');
 
   if (totalHours >= activeHours) return 'Active';
   if (totalHours >= semiActiveHours) return 'Semi Active';
