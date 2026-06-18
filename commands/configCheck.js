@@ -29,6 +29,8 @@ module.exports = {
     const ticketTypes = (config.tickets?.types || []).filter((type) => type.enabled);
     const googleEnabled = Boolean(config.google?.enabled || process.env.GOOGLE_SCRIPT_WEBAPP_URL);
     const googleReady = Boolean(process.env.GOOGLE_SCRIPT_WEBAPP_URL && process.env.GOOGLE_SCRIPT_SECRET);
+    const devOnlyEnabled = Boolean(config.devOnly?.enabled);
+    const devOnlyRoleCount = Array.isArray(config.devOnly?.roleIds) ? config.devOnly.roleIds.filter(Boolean).length : 0;
 
     const lines = [
       statusLine(Boolean(config.departmentName || config.department?.name), 'Department name', config.departmentName || config.department?.name || 'Missing'),
@@ -37,7 +39,8 @@ module.exports = {
       statusLine(permissionRoles.length > 0, 'Permission roles', permissionRoles.length ? `${permissionRoles.length} configured` : 'No permission roles configured'),
       statusLine(logChannels.length > 0, 'Log channels', logChannels.length ? `${logChannels.length} configured` : 'No log channels configured'),
       statusLine(!ticketsEnabled || ticketTypes.length > 0, 'Tickets', ticketsEnabled ? `${ticketTypes.length} enabled ticket type(s)` : 'Disabled'),
-      statusLine(!googleEnabled || googleReady, 'Google', googleEnabled ? (googleReady ? 'Enabled and environment variables are present' : 'Enabled but GOOGLE_SCRIPT_WEBAPP_URL/GOOGLE_SCRIPT_SECRET is missing') : 'Disabled')
+      statusLine(!googleEnabled || googleReady, 'Google', googleEnabled ? (googleReady ? 'Enabled and environment variables are present' : 'Enabled but GOOGLE_SCRIPT_WEBAPP_URL/GOOGLE_SCRIPT_SECRET is missing') : 'Disabled'),
+      statusLine(!devOnlyEnabled || devOnlyRoleCount > 0, 'Dev-only mode', devOnlyEnabled ? `${devOnlyRoleCount} dev role(s) configured` : 'Disabled')
     ];
 
     await interaction.reply({

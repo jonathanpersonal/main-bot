@@ -134,6 +134,30 @@ async function markBotActionComplete(actionId, result = {}) {
   });
 }
 
+async function lookupOfficer(data = {}) {
+  return postToGoogle('LOOKUP_OFFICER', data);
+}
+
+async function syncOfficerFromGoogle(data = {}) {
+  return postToGoogle('SYNC_OFFICER_FROM_GOOGLE', data);
+}
+
+async function notifyOfficerSyncCompleted(data = {}) {
+  return postToGoogle('SYNC_OFFICER_COMPLETED', data);
+}
+
+async function notifyOfficerSyncFailed(data = {}) {
+  return postToGoogle('SYNC_OFFICER_FAILED', data);
+}
+
+async function manualOfficerUpdate(data = {}) {
+  return postToGoogle('MANUAL_OFFICER_UPDATE', data);
+}
+
+async function importExistingUsers(data = {}) {
+  return postToGoogle('IMPORT_EXISTING_USERS', data);
+}
+
 async function markBotActionFailed(actionId, errorMessage, result = {}) {
   return postToGoogle('markBotActionFailed', {
     actionId,
@@ -150,5 +174,11 @@ module.exports = {
   submitBotRequest,
   getPendingBotActions,
   markBotActionComplete,
+  lookupOfficer,
+  syncOfficerFromGoogle,
+  notifyOfficerSyncCompleted,
+  notifyOfficerSyncFailed,
+  manualOfficerUpdate,
+  importExistingUsers,
   markBotActionFailed
 };

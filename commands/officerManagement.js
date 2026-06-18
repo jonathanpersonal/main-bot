@@ -14,6 +14,8 @@ const { getServerConfig } = require('../utils/configUtils');
 const { buildAppealStartButtonRow } = require('../utils/appealUtils');
 const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 const { getRankKey, getRankName } = require('../utils/registrationUtils');
+const { requirePermission } = require('../utils/permissionUtils');
+
 const {
   sendOfficerActionLog,
   sendOfficerRankChangeLog
@@ -100,6 +102,9 @@ module.exports = {
 
     const action = interaction.options.getString('action');
     const officerUser = interaction.options.getUser('officer');
+
+    const permissionByAction = { promote: 'commandStaff', demote: 'commandStaff', termination: 'highCommand', resignation: 'commandStaff', coaching: 'supervisor', strike: 'supervisor' };
+    if (permissionByAction[action] && !await requirePermission(interaction, permissionByAction[action], { config: serverConfig })) return;
 
     if (!interaction.guild) {
       return interaction.reply({
@@ -308,6 +313,9 @@ module.exports = {
     }
 
     if (buttonAction === 'confirm') {
+      const permissionByAction = { promote: 'commandStaff', demote: 'commandStaff', termination: 'highCommand', resignation: 'commandStaff', coaching: 'supervisor', strike: 'supervisor' };
+      const serverConfig = getServerConfig(interaction.guildId);
+      if (permissionByAction[state.action] && !await requirePermission(interaction, permissionByAction[state.action], { config: serverConfig })) return true;
       await interaction.deferUpdate();
       await confirmOfficerAction({ interaction, state, stateKey });
       return true;
