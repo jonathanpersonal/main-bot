@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const {
   getGoogleConfig,
   postToGoogle,
@@ -41,11 +41,11 @@ module.exports = {
     if (!config.enabled) {
       return interaction.reply({
         content: 'Google integration is not configured. Add `GOOGLE_SCRIPT_WEBAPP_URL` and `GOOGLE_SCRIPT_SECRET` to the bot environment variables, then restart the bot.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       if (mode === 'ping') {

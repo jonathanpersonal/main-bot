@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { getServerConfig } = require('../utils/configUtils');
 const { canManageProbation } = require('../utils/permissionUtils');
 const store = require('../utils/workflowStore');
@@ -22,8 +22,8 @@ module.exports = {
   async execute(interaction) {
     const config = getServerConfig(); const sub = interaction.options.getSubcommand();
     const commandOnly = ['approve-removal','deny-removal'].includes(sub) || (sub === 'review' && ['pass','request-removal'].includes(interaction.options.getString('decision')));
-    if (!canManageProbation(interaction.member, config, commandOnly ? 'command' : 'officer')) return interaction.reply({ content: 'You are not authorized to manage probation.', ephemeral: true });
-    await interaction.deferReply({ ephemeral: true });
+    if (!canManageProbation(interaction.member, config, commandOnly ? 'command' : 'officer')) return interaction.reply({ content: 'You are not authorized to manage probation.', flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     if (sub === 'status') return status(interaction, config);
     if (sub === 'extend') return extend(interaction, config);
     if (sub === 'ridealong') return ridealong(interaction, config);

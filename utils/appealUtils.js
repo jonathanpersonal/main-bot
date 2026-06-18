@@ -6,7 +6,8 @@ const {
   EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  MessageFlags
 } = require('discord.js');
 
 const { getServerConfig } = require('./configUtils');
@@ -168,7 +169,7 @@ async function showAppealInstructions({ interaction, serverConfig, appealType, o
   if (interaction.user.id !== officerId) {
     await interaction.reply({
       content: 'This appeal button is only for the user it was sent to.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }
@@ -176,13 +177,13 @@ async function showAppealInstructions({ interaction, serverConfig, appealType, o
   if (!serverConfig?.appeals?.enabled) {
     await interaction.reply({
       content: 'Appeals are not currently enabled.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return true;
   }
 
   if (!APPEAL_TYPES[appealType]) {
-    await interaction.reply({ content: 'This appeal type is not available.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal type is not available.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -206,7 +207,7 @@ async function showAppealInstructions({ interaction, serverConfig, appealType, o
   await interaction.reply({
     content,
     components: [buildInstructionButtonRow({ appealType, officerId, caseId })],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
   return true;
 }
@@ -226,7 +227,7 @@ function buildInstructionButtonRow({ appealType, officerId, caseId }) {
 
 async function cancelAppeal(interaction, officerId) {
   if (interaction.user.id !== officerId) {
-    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -239,18 +240,18 @@ async function cancelAppeal(interaction, officerId) {
 
 async function showAppealModal({ interaction, serverConfig, appealType, officerId, caseId }) {
   if (interaction.user.id !== officerId) {
-    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
   if (!serverConfig?.appeals?.enabled) {
-    await interaction.reply({ content: 'Appeals are not currently enabled.', ephemeral: true });
+    await interaction.reply({ content: 'Appeals are not currently enabled.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
   const typeConfig = getAppealTypeConfig(appealType, caseId);
   if (!typeConfig) {
-    await interaction.reply({ content: 'This appeal type is not available.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal type is not available.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -268,22 +269,22 @@ async function showAppealModal({ interaction, serverConfig, appealType, officerI
 
 async function submitAppeal({ interaction, client, serverConfig, appealType, officerId, caseId }) {
   if (interaction.user.id !== officerId) {
-    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
   if (!serverConfig?.appeals?.enabled) {
-    await interaction.reply({ content: 'Appeals are not currently enabled.', ephemeral: true });
+    await interaction.reply({ content: 'Appeals are not currently enabled.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
   const typeConfig = getAppealTypeConfig(appealType, caseId);
   if (!typeConfig) {
-    await interaction.reply({ content: 'This appeal type is not available.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal type is not available.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const guild = await fetchAppealGuild(client, serverConfig);
   if (!guild) {
@@ -371,7 +372,7 @@ async function submitAppeal({ interaction, client, serverConfig, appealType, off
 async function assignAppeal({ interaction, serverConfig, appealType, officerId, appealId }) {
   if (!(await ensureStaffCanManageAppeal(interaction, serverConfig))) return true;
 
-  await interaction.reply({ content: `Appeal assigned to ${interaction.user}.`, ephemeral: true });
+  await interaction.reply({ content: `Appeal assigned to ${interaction.user}.`, flags: MessageFlags.Ephemeral });
   await safeThreadSend(interaction.channel, `Appeal assigned to ${interaction.user}.`);
 
   await sendAppealLog({
@@ -390,7 +391,7 @@ async function assignAppeal({ interaction, serverConfig, appealType, officerId, 
 async function markAppealUnderReview({ interaction, serverConfig, appealType, officerId, appealId }) {
   if (!(await ensureStaffCanManageAppeal(interaction, serverConfig))) return true;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await updateAppealTags(interaction.channel, serverConfig, ['underReview'], ['pending']);
   await safeThreadSend(interaction.channel, `Appeal marked under review by ${interaction.user}.`);
 
@@ -437,7 +438,7 @@ async function showInfoRequestModal({ interaction, serverConfig, appealType, off
 async function submitInfoRequest({ interaction, serverConfig, appealType, officerId, appealId }) {
   if (!(await ensureStaffCanManageAppeal(interaction, serverConfig))) return true;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const request = interaction.fields.getTextInputValue('request') || 'No details provided.';
   await updateAppealTags(interaction.channel, serverConfig, ['infoNeeded'], ['underReview']);
   await safeThreadSend(interaction.channel, `Additional information requested by ${interaction.user}:\n\n${request}`);
@@ -488,12 +489,12 @@ function buildOfficerInfoRow({ threadId, officerId, appealId }) {
 
 async function showOfficerInfoModal({ interaction, serverConfig, threadId, officerId, appealId }) {
   if (interaction.user.id !== officerId) {
-    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
   if (!serverConfig?.appeals?.enabled) {
-    await interaction.reply({ content: 'Appeals are not currently enabled.', ephemeral: true });
+    await interaction.reply({ content: 'Appeals are not currently enabled.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -511,11 +512,11 @@ async function showOfficerInfoModal({ interaction, serverConfig, threadId, offic
 
 async function submitOfficerInfo({ interaction, client, serverConfig, threadId, officerId, appealId }) {
   if (interaction.user.id !== officerId) {
-    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const thread = await client.channels.fetch(threadId).catch(() => null);
   if (!thread || typeof thread.send !== 'function') {
     await interaction.editReply('Your information could not be recorded because the appeal thread could not be found. Please contact staff.');
@@ -549,11 +550,11 @@ async function submitOfficerInfo({ interaction, client, serverConfig, threadId, 
 
 async function declineOfficerInfo({ interaction, client, serverConfig, threadId, officerId, appealId }) {
   if (interaction.user.id !== officerId) {
-    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', ephemeral: true });
+    await interaction.reply({ content: 'This appeal button is only for the user it was sent to.', flags: MessageFlags.Ephemeral });
     return true;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const thread = await client.channels.fetch(threadId).catch(() => null);
   if (!thread || typeof thread.send !== 'function') {
     await interaction.editReply('Your response could not be recorded because the appeal thread could not be found. Please contact staff.');
@@ -607,7 +608,7 @@ async function showDecisionModal({ interaction, serverConfig, appealType, office
 async function submitDecision({ interaction, serverConfig, appealType, officerId, appealId, decision }) {
   if (!(await ensureStaffCanManageAppeal(interaction, serverConfig))) return true;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const isApproval = decision === 'approve';
   const finalStatus = isApproval ? 'approved' : 'denied';
   const reason = interaction.fields.getTextInputValue('reason') || 'No reason provided.';
@@ -938,7 +939,7 @@ function buildReviewerMentionLine(serverConfig) {
 
 async function ensureStaffCanManageAppeal(interaction, serverConfig) {
   if (!serverConfig?.appeals?.enabled) {
-    await interaction.reply({ content: 'Appeals are not currently enabled.', ephemeral: true });
+    await interaction.reply({ content: 'Appeals are not currently enabled.', flags: MessageFlags.Ephemeral });
     return false;
   }
 
@@ -951,7 +952,7 @@ async function ensureStaffCanManageAppeal(interaction, serverConfig) {
   const hasPermission = allowedRoleIds.length > 0 && allowedRoleIds.some((roleId) => memberRoles?.has(roleId));
 
   if (!hasPermission) {
-    await interaction.reply({ content: 'You do not have permission to manage appeals.', ephemeral: true });
+    await interaction.reply({ content: 'You do not have permission to manage appeals.', flags: MessageFlags.Ephemeral });
     return false;
   }
 
