@@ -3,19 +3,22 @@ const { getServerConfig } = require('../utils/configUtils');
 const { applyConfiguredRoleChanges } = require('../utils/roleUtils');
 const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 const store = require('../utils/workflowStore');
+const { safeListActiveCadets } = require('../utils/googleWorkflowStore');
 const { cleanRoleIds } = require('../utils/permissionUtils');
 const { safeDm, logWorkflow, fmt } = require('../utils/trainingWorkflowUtils');
 let task = null;
 function daysUntil(date) { return Math.ceil((new Date(date).getTime() - Date.now()) / 86400000); }
-function shouldRemind(c, days) { if (days < 0 || days > 3) return false; if (!c.reminderLastSentAt) return true; return new Date(c.reminderLastSentAt).toDateString() !== new Date().toDateString(); }
+function shouldRemind(c, daysUntilDeadline, reminderWindowDays) { if (daysUntilDeadline < 0 || daysUntilDeadline > reminderWindowDays) return false; if (!c.reminderLastSentAt) return true; return new Date(c.reminderLastSentAt).toDateString() !== new Date().toDateString(); }
 async function runCadetDeadlineCheck(client) {
   const config = getServerConfig(); const t = config.training || config.trainingManagement || {}; const dc = t.deadlineCheck || {}; if (dc.enabled === false) return { skipped: true };
   const guildId = config.guildId || process.env.GUILD_ID; const guild = guildId ? await client.guilds.fetch(guildId).catch(() => null) : Array.from(client.guilds.cache.values())[0]; if (!guild) return { skipped: true, reason: 'No guild' };
+  const googleCadets = await safeListActiveCadets(guild.id);
+  const cadets = googleCadets || store.listCadets(guild.id);
   let reminded = 0; let terminated = 0;
-  for (const cadet of store.listCadets(guild.id)) {
+  for (const cadet of cadets) {
     if (!cadet.deadlineAt) continue; const d = daysUntil(cadet.deadlineAt);
     const member = await guild.members.fetch(cadet.discordId).catch(() => null);
-    if (shouldRemind(cadet, dc.reminderDaysBeforeDeadline ?? t.cadetReminderDays ?? 3)) {
+    if (shouldRemind(cadet, d, dc.reminderDaysBeforeDeadline ?? t.cadetReminderDays ?? 3)) {
       const msg = fmt(t.messages?.cadetDeadlineReminder || 'Reminder: your cadet training deadline is {deadline}. Roster: {publicRosterUrl}', { deadline: new Date(cadet.deadlineAt).toLocaleDateString(), publicRosterUrl: t.publicRosterUrl || 'PUBLIC_ROSTER_URL_PLACEHOLDER' });
       if (member) await safeDm(member.user, msg);
       store.upsertCadet(guild.id, cadet.discordId, { reminderLastSentAt: new Date().toISOString() }, { action: 'CADET_DEADLINE_REMINDER_SENT', actorDiscordId: client.user.id });

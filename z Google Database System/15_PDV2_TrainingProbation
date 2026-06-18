@@ -37,3 +37,197 @@ function pdv2AppendTrainingAudit_(actionType, data, requestId) {
   pdv2AppendObject_(PDV2.SHEETS.TRAINING_AUDIT, row);
   return row;
 }
+
+function pdv2WorkflowPayload_(data) {
+  data = data || {};
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  return Object.assign({}, payload, data);
+}
+
+function pdv2NestedWorkflowRecord_(data, key) {
+  var payload = data && data.payload && typeof data.payload === 'object' ? data.payload : {};
+  return payload[key] && typeof payload[key] === 'object' ? payload[key] : {};
+}
+
+function pdv2WorkflowDiscordId_(data, record) {
+  return pdv2String_(
+    pdv2Pick_(data, ['targetDiscordId', 'discordId'], '') ||
+    pdv2Pick_(record, ['discordId', 'targetDiscordId', 'Discord ID'], '')
+  );
+}
+
+function pdv2UpsertWorkflowCadet_(actionType, data, requestId) {
+  data = data || {};
+  var merged = pdv2WorkflowPayload_(data);
+  var cadet = Object.assign({}, pdv2NestedWorkflowRecord_(data, 'cadet'), merged);
+  var discordId = pdv2WorkflowDiscordId_(data, cadet);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for cadet workflow update.');
+
+  var now = pdv2Now_();
+  var status = pdv2Pick_(cadet, ['status'], '');
+  if (actionType === 'CADET_APPROVED') status = 'ACTIVE';
+  if (actionType === 'CADET_DENIED') status = 'DENIED';
+  if (actionType === 'CADET_AUTO_TERMINATED') status = 'TERMINATED';
+  if (actionType === 'TRAINING_COMPLETED_PASS') status = 'COMPLETED';
+  if (actionType === 'TRAINING_COMPLETED_FAIL') status = 'FAILED';
+
+  var deadline = pdv2Pick_(cadet, ['deadlineAt', 'deadline', 'endDate'], '') || pdv2Pick_(merged, ['deadlineAt', 'deadline', 'endDate'], '');
+  var name = pdv2Pick_(data, ['targetName'], '') || pdv2Pick_(cadet, ['dbName', 'targetName', 'name'], '');
+  var rowData = {
+    'Discord ID': discordId,
+    'Name': name,
+    'Date Joined': pdv2Pick_(cadet, ['createdAt', 'dateJoined'], '') || now,
+    'End Date': deadline,
+    'Trained?': actionType === 'TRAINING_COMPLETED_PASS' ? 'TRUE' : pdv2Pick_(cadet, ['trained'], ''),
+    'Current End Date': deadline,
+    'Status': status || 'ACTIVE',
+    'Modified By:': pdv2Pick_(data, ['submittedByDiscordId'], '') || pdv2Pick_(cadet, ['updatedBy'], ''),
+    'Name (DO NOT TOUCH)': name,
+    'Manual End Date': pdv2Pick_(cadet, ['manualEndDate'], ''),
+    'Discord Username': pdv2Pick_(cadet, ['discordUsername', 'targetDiscordTag'], '') || pdv2Pick_(data, ['targetDiscordTag'], ''),
+    'Last Reminder Sent At': actionType === 'CADET_DEADLINE_REMINDER_SENT' ? now : pdv2Pick_(cadet, ['reminderLastSentAt'], ''),
+    'Notes': pdv2Pick_(data, ['reason'], '') || pdv2Pick_(cadet, ['notes'], ''),
+    'Updated At': now,
+    'Request ID': requestId || ''
+  };
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.CADET_TRACKER, 'Discord ID', discordId);
+  var saved = row ? pdv2UpdateRowObject_(PDV2.SHEETS.CADET_TRACKER, row, rowData) : (pdv2AppendObject_(PDV2.SHEETS.CADET_TRACKER, rowData), pdv2RowToObject_(pdv2GetSheet_(PDV2.SHEETS.CADET_TRACKER), pdv2FindRowByValue_(PDV2.SHEETS.CADET_TRACKER, 'Discord ID', discordId)));
+  return pdv2Success_({ cadet: saved });
+}
+
+function pdv2UpsertWorkflowProbation_(actionType, data, requestId) {
+  data = data || {};
+  var merged = pdv2WorkflowPayload_(data);
+  var probation = Object.assign({}, pdv2NestedWorkflowRecord_(data, 'probation'), merged);
+  var discordId = pdv2WorkflowDiscordId_(data, probation);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for probation workflow update.');
+
+  var now = pdv2Now_();
+  var status = pdv2Pick_(probation, ['status'], '');
+  if (actionType === 'PROBATION_STARTED') status = 'ACTIVE';
+  if (actionType === 'PROBATION_CYCLE_FAILED') status = 'ACTIVE';
+  if (actionType === 'PROBATION_REMOVAL_REQUESTED') status = 'REMOVAL_REQUESTED';
+  if (actionType === 'PROBATION_REMOVAL_APPROVED') status = 'REMOVED';
+  if (actionType === 'PROBATION_PASSED' || actionType === 'PROBATION_GRADUATED') status = 'PASSED';
+
+  var rowData = {
+    'Discord ID': discordId,
+    'Discord Username': pdv2Pick_(probation, ['discordUsername'], '') || pdv2Pick_(data, ['targetDiscordTag'], ''),
+    'Database Name': pdv2Pick_(probation, ['dbName'], '') || pdv2Pick_(data, ['targetName'], ''),
+    'Callsign': pdv2Pick_(probation, ['callsign'], ''),
+    'Training Officer Discord ID': pdv2Pick_(probation, ['trainingOfficerId', 'trainingOfficerDiscordId'], '') || pdv2Pick_(data, ['submittedByDiscordId'], ''),
+    'Probation Start': pdv2Pick_(probation, ['probationStartAt'], '') || now,
+    'Current Cycle Start': pdv2Pick_(probation, ['cycleStartAt'], '') || now,
+    'Current Cycle End': pdv2Pick_(probation, ['cycleEndAt'], ''),
+    'Cycle Number': pdv2Pick_(probation, ['cycleNumber'], 1),
+    'Max Cycles': pdv2Pick_(probation, ['maxCycles'], 2),
+    'Status': status || 'ACTIVE',
+    'Ride-along Count': pdv2Pick_(probation, ['rideAlongCount'], ''),
+    'Feedback Count': pdv2Pick_(probation, ['feedbackCount'], ''),
+    'Notes': pdv2Pick_(data, ['reason'], '') || pdv2Pick_(probation, ['notes'], ''),
+    'Last Updated': now,
+    'Updated By': pdv2Pick_(probation, ['updatedBy'], '') || pdv2Pick_(data, ['submittedByDiscordId'], ''),
+    'Final Decision': pdv2Pick_(probation, ['finalDecision'], ''),
+    'Graduation Date': pdv2Pick_(probation, ['graduationAt'], ''),
+    'Request ID': requestId || ''
+  };
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.PROBATIONARY_ROSTER, 'Discord ID', discordId);
+  var saved = row ? pdv2UpdateRowObject_(PDV2.SHEETS.PROBATIONARY_ROSTER, row, rowData) : (pdv2AppendObject_(PDV2.SHEETS.PROBATIONARY_ROSTER, rowData), pdv2RowToObject_(pdv2GetSheet_(PDV2.SHEETS.PROBATIONARY_ROSTER), pdv2FindRowByValue_(PDV2.SHEETS.PROBATIONARY_ROSTER, 'Discord ID', discordId)));
+  return pdv2Success_({ probation: saved });
+}
+
+function pdv2AppendProbationRideAlong_(data, requestId) {
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  var probation = payload.probation && typeof payload.probation === 'object' ? payload.probation : {};
+  var discordId = pdv2WorkflowDiscordId_(data, probation);
+  var row = {
+    'RideAlong ID': pdv2GenerateId_('PRA'),
+    'Created At': pdv2Now_(),
+    'Discord ID': discordId,
+    'Name': pdv2Pick_(data, ['targetName'], '') || pdv2Pick_(probation, ['dbName'], ''),
+    'Conducted By Discord ID': pdv2Pick_(payload, ['conductedByDiscordId'], ''),
+    'Existing RideAlong Record ID': pdv2Pick_(payload, ['existingRideAlongRecordId'], ''),
+    'Notes': pdv2Pick_(data, ['reason'], ''),
+    'Request ID': requestId || ''
+  };
+  pdv2AppendObject_(PDV2.SHEETS.PROBATION_RIDEALONGS, row);
+  return row;
+}
+
+function pdv2AppendProbationFeedback_(data, requestId) {
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  var probation = payload.probation && typeof payload.probation === 'object' ? payload.probation : {};
+  var discordId = pdv2WorkflowDiscordId_(data, probation);
+  var row = {
+    'Feedback ID': pdv2GenerateId_('PFB'),
+    'Created At': pdv2Now_(),
+    'Discord ID': discordId,
+    'Name': pdv2Pick_(data, ['targetName'], '') || pdv2Pick_(probation, ['dbName'], ''),
+    'Result': pdv2Pick_(payload, ['result'], ''),
+    'Notes': pdv2Pick_(data, ['reason'], ''),
+    'Submitted By Discord ID': pdv2Pick_(data, ['submittedByDiscordId'], ''),
+    'Request ID': requestId || ''
+  };
+  pdv2AppendObject_(PDV2.SHEETS.PROBATION_FEEDBACK, row);
+  return row;
+}
+
+function pdv2AppendProbationDecision_(actionType, data, requestId) {
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  var probation = payload.probation && typeof payload.probation === 'object' ? payload.probation : {};
+  var discordId = pdv2WorkflowDiscordId_(data, probation);
+  var row = {
+    'Decision ID': pdv2GenerateId_('PDEC'),
+    'Created At': pdv2Now_(),
+    'Discord ID': discordId,
+    'Name': pdv2Pick_(data, ['targetName'], '') || pdv2Pick_(probation, ['dbName'], ''),
+    'Decision': actionType,
+    'Notes': pdv2Pick_(data, ['reason'], ''),
+    'Submitted By Discord ID': pdv2Pick_(data, ['submittedByDiscordId'], ''),
+    'Status': actionType === 'PROBATION_REMOVAL_REQUESTED' ? 'PENDING' : 'RECORDED',
+    'Request ID': requestId || ''
+  };
+  pdv2AppendObject_(PDV2.SHEETS.PROBATION_DECISIONS, row);
+  return row;
+}
+
+function pdv2HandleTrainingProbationWorkflowAction_(actionType, data, requestId) {
+  pdv2EnsureTrainingProbationSheets_();
+  var result = { audit: pdv2AppendTrainingAudit_(actionType, data, requestId) };
+  if (actionType.indexOf('CADET_') === 0 || actionType.indexOf('TRAINING_COMPLETED_') === 0) result.cadet = pdv2UpsertWorkflowCadet_(actionType, data, requestId);
+  if (actionType.indexOf('PROBATION_') === 0) result.probation = pdv2UpsertWorkflowProbation_(actionType, data, requestId);
+  if (actionType === 'PROBATION_RIDEALONG_LOGGED') result.rideAlong = pdv2AppendProbationRideAlong_(data, requestId);
+  if (actionType === 'PROBATION_FEEDBACK_LOGGED') result.feedback = pdv2AppendProbationFeedback_(data, requestId);
+  if (actionType === 'PROBATION_CYCLE_FAILED' || actionType === 'PROBATION_REMOVAL_REQUESTED' || actionType === 'PROBATION_REMOVAL_APPROVED' || actionType === 'PROBATION_PASSED' || actionType === 'PROBATION_GRADUATED') result.decision = pdv2AppendProbationDecision_(actionType, data, requestId);
+  return result;
+}
+
+function pdv2ListTrainingCadets_(data) {
+  pdv2EnsureTrainingProbationSheets_();
+  var inactive = ['TERMINATED', 'COMPLETED', 'FAILED', 'DENIED', 'TRAINED/PASSED'];
+  var rows = pdv2ListRows_(PDV2.SHEETS.CADET_TRACKER).filter(function(row) {
+    var status = pdv2Upper_(row.Status || '');
+    return inactive.indexOf(status) < 0;
+  });
+  return pdv2Success_({ cadets: rows });
+}
+
+function pdv2ListProbationaryOfficers_(data) {
+  pdv2EnsureTrainingProbationSheets_();
+  var inactive = ['PASSED', 'REMOVED', 'GRADUATED'];
+  var rows = pdv2ListRows_(PDV2.SHEETS.PROBATIONARY_ROSTER).filter(function(row) {
+    var status = pdv2Upper_(row.Status || '');
+    return inactive.indexOf(status) < 0;
+  });
+  return pdv2Success_({ probationary: rows });
+}
+
+function pdv2GetProbationaryOfficer_(discordId) {
+  pdv2EnsureTrainingProbationSheets_();
+  discordId = pdv2String_(discordId);
+  if (!discordId) return pdv2Fail_('Missing Discord ID.');
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.PROBATIONARY_ROSTER, 'Discord ID', discordId);
+  return pdv2Success_({ probation: row ? pdv2RowToObject_(pdv2GetSheet_(PDV2.SHEETS.PROBATIONARY_ROSTER), row) : null });
+}

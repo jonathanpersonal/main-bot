@@ -53,6 +53,41 @@ Recommended first-time setup order:
 
 Use `/department-setup export` when you need a sanitized support copy of the setup. The export does not include full Google webhook secrets.
 
+## Training and probation workflow data
+
+Patch 3 treats Google Sheets as the official source of truth for cadet, training, and probation workflow records. The bot writes workflow events to the Google Apps Script web app, and the startup/daily automation reads active cadets and probationary officers back from Google before taking action.
+
+Durable Google tabs used by this workflow:
+
+- `CadetTracker`
+- `TrainingRecords`
+- `ProbationaryRoster`
+- `ProbationRideAlongs`
+- `ProbationFeedback`
+- `ProbationDecisions`
+- `TrainingAudit`
+
+The local `data/training-workflow.json` file is only a cache/fallback for temporary Google outages. Do not treat it as the official roster, and do not manually edit it as the durable record.
+
+SQL support is included as a planned mirror/schema path in `database/dutySchema.sql` for hosts that want database-backed workflow storage later:
+
+- `training_cadets`
+- `training_records`
+- `probationary_officers`
+- `probation_feedback`
+- `probation_decisions`
+- `training_audit`
+
+Those SQL workflow tables do not replace Google in this patch. Existing ride-along records remain in `duty_ridealong_feedback`; probation checks count those records when the SQL duty database is configured and never replace or rewrite the existing ride-along system.
+
+Manual setup after importing the Google Apps Script files:
+
+1. Deploy the updated web app.
+2. Run `pdv2EnsureTrainingProbationSheets_()` once, or run the normal Apps Script install/setup flow.
+3. Confirm `GOOGLE_SCRIPT_WEBAPP_URL` and `GOOGLE_SCRIPT_SECRET` are set for the bot.
+4. Configure real cadet, applicant, probationary, training officer, FTO command, department command, and graduation role IDs in the active guild config.
+5. Replace `PUBLIC_ROSTER_URL_PLACEHOLDER` and `STEAM_GROUP_URL_PLACEHOLDER` with the real per-server links.
+
 ## Parent/Child Repo Deployment Notes
 
 This project is intended to be used as a shared **main-bot** base repo. Production department bots should live in separate child repos, such as `RWPD-Bot`, and receive shared code through sync pull requests from this base repo.

@@ -330,7 +330,12 @@ var PDV2 = {
       'Status Override',
       'Modified By:',
       'Name (DO NOT TOUCH)',
-      'Manual End Date'
+      'Manual End Date',
+      'Discord Username',
+      'Last Reminder Sent At',
+      'Notes',
+      'Updated At',
+      'Request ID'
     ],
 
     ProbationaryRoster: ['Discord ID','Discord Username','Database Name','Callsign','Training Officer Discord ID','Probation Start','Current Cycle Start','Current Cycle End','Cycle Number','Max Cycles','Status','Ride-along Count','Feedback Count','Notes','Last Updated','Updated By','Final Decision','Graduation Date','Request ID'],
