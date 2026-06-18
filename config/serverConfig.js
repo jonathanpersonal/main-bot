@@ -374,7 +374,7 @@ Internal Affairs Team`
   ranks: [
     {
       name: 'Cadet',
-      rankRoleId: '1513552137131524288',
+      rankRoleId: '1177028178749952141',
       permissionRoleId: '1513552154538020884',
       level: 1
     },
