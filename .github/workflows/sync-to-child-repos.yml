@@ -10,6 +10,7 @@ on:
 
 jobs:
   sync:
+    name: Sync shared bot code to child repo
     runs-on: ubuntu-latest
 
     strategy:
@@ -22,27 +23,107 @@ jobs:
       - name: Checkout main-bot
         uses: actions/checkout@v4
 
-      - name: Clone child repo
+      - name: Build safe branch name
         run: |
-          git clone https://x-access-token:${{ secrets.BOT_SYNC_TOKEN }}@github.com/${{ matrix.child_repo }} child-repo
+          set -euo pipefail
+
+          RAW_RELEASE="${{ inputs.release_name }}"
+
+          SAFE_RELEASE="$(printf '%s' "$RAW_RELEASE" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+
+          if [ -z "$SAFE_RELEASE" ]; then
+            SAFE_RELEASE="manual-sync"
+          fi
+
+          SYNC_BRANCH="sync/${SAFE_RELEASE}-${GITHUB_RUN_NUMBER}"
+
+          echo "SYNC_BRANCH=$SYNC_BRANCH" >> "$GITHUB_ENV"
+          echo "RAW_RELEASE=$RAW_RELEASE" >> "$GITHUB_ENV"
+          echo "Using sync branch: $SYNC_BRANCH"
+
+      - name: Clone child repo
+        env:
+          BOT_SYNC_TOKEN: ${{ secrets.BOT_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BOT_SYNC_TOKEN:-}" ]; then
+            echo "BOT_SYNC_TOKEN secret is missing or empty."
+            exit 1
+          fi
+
+          git clone "https://x-access-token:${BOT_SYNC_TOKEN}@github.com/${{ matrix.child_repo }}" child-repo
 
       - name: Prepare sync branch
         run: |
+          set -euo pipefail
+
           cd child-repo
           git config user.name "department-bot-sync"
           git config user.email "department-bot-sync@users.noreply.github.com"
-          git checkout -b sync/${{ inputs.release_name }}-${{ github.run_number }}
+          git checkout -b "$SYNC_BRANCH"
 
       - name: Copy shared bot code
         run: |
+          set -euo pipefail
+
+          # These folders are shared bot source code and should match main-bot.
           rsync -av --delete commands/ child-repo/commands/
-          rsync -av --delete config/ child-repo/config/
-          rsync -av --delete database/ child-repo/database/
           rsync -av --delete handlers/ child-repo/handlers/
           rsync -av --delete scripts/ child-repo/scripts/
           rsync -av --delete services/ child-repo/services/
           rsync -av --delete utils/ child-repo/utils/
 
+          # IMPORTANT:
+          # Do not wipe child-repo/config because child bots keep server-specific
+          # roles, channels, ranks, webhook URLs, and department settings there.
+          mkdir -p child-repo/config
+
+          # Safe shared config files/templates only.
+          if [ -f config/defaultGuildConfig.js ]; then
+            cp config/defaultGuildConfig.js child-repo/config/defaultGuildConfig.js
+          fi
+
+          if [ -f config/serverConfig.example.js ]; then
+            cp config/serverConfig.example.js child-repo/config/serverConfig.example.js
+          fi
+
+          if [ -f config/config.example.js ]; then
+            cp config/config.example.js child-repo/config/config.example.js
+          fi
+
+          if [ -d config/templates ]; then
+            rsync -av --delete config/templates/ child-repo/config/templates/
+          fi
+
+          # Explicitly never overwrite these child-specific config locations.
+          # This protects files like:
+          #   config/serverConfig.js
+          #   config/guildConfigs/*.js
+          #   config/*.local.js
+          #   config/*.secret.js
+
+          # Do not wipe child-repo/database because child bots may keep live DB files there.
+          # Copy only shared schema/template files.
+          mkdir -p child-repo/database
+
+          find database -maxdepth 1 -type f \( \
+            -name '*.sql' -o \
+            -name '*.schema.js' -o \
+            -name '*.template.js' -o \
+            -name '*.example.js' -o \
+            -name '*.md' \
+          \) -print0 2>/dev/null | while IFS= read -r -d '' file; do
+            cp "$file" "child-repo/database/$(basename "$file")"
+          done
+
+          if [ -d database/templates ]; then
+            rsync -av --delete database/templates/ child-repo/database/templates/
+          fi
+
+          # Optional shared folders.
           if [ -d cloudflare ]; then
             rsync -av --delete cloudflare/ child-repo/cloudflare/
           fi
@@ -51,10 +132,17 @@ jobs:
             rsync -av --delete "z Google Database System/" "child-repo/z Google Database System/"
           fi
 
+          # Root shared files.
           cp index.js child-repo/index.js
           cp package.json child-repo/package.json
-          cp README.md child-repo/README.md
-          cp .gitignore child-repo/.gitignore
+
+          if [ -f README.md ]; then
+            cp README.md child-repo/README.md
+          fi
+
+          if [ -f .gitignore ]; then
+            cp .gitignore child-repo/.gitignore
+          fi
 
           if [ -f package-lock.json ]; then
             cp package-lock.json child-repo/package-lock.json
@@ -64,41 +152,58 @@ jobs:
             cp .env.example child-repo/.env.example
           fi
 
+      - name: Show sync summary
+        run: |
+          set -euo pipefail
+
+          cd child-repo
+          echo "Files changed by sync:"
+          git status --short
+
       - name: Commit changes
         id: commit
         run: |
+          set -euo pipefail
+
           cd child-repo
 
           if git diff --quiet && git diff --cached --quiet; then
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No changes found for ${{ matrix.child_repo }}"
           else
             git add .
-            git commit -m "Sync main-bot ${{ inputs.release_name }}"
-            echo "changed=true" >> $GITHUB_OUTPUT
+            git commit -m "Sync main-bot $RAW_RELEASE"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Push sync branch
         if: steps.commit.outputs.changed == 'true'
         run: |
+          set -euo pipefail
+
           cd child-repo
-          git push origin sync/${{ inputs.release_name }}-${{ github.run_number }}
+          git push origin "$SYNC_BRANCH"
 
       - name: Create pull request
         if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.BOT_SYNC_TOKEN }}
         run: |
+          set -euo pipefail
+
           cd child-repo
           gh pr create \
-            --repo ${{ matrix.child_repo }} \
+            --repo "${{ matrix.child_repo }}" \
             --base main \
-            --head sync/${{ inputs.release_name }}-${{ github.run_number }} \
-            --title "Sync main-bot ${{ inputs.release_name }}" \
+            --head "$SYNC_BRANCH" \
+            --title "Sync main-bot $RAW_RELEASE" \
             --body "This PR syncs shared bot code from jonathanpersonal/main-bot.
 
           Source repo: jonathanpersonal/main-bot
-          Release/sync name: ${{ inputs.release_name }}
+          Release/sync name: $RAW_RELEASE
+          Safe branch name: $SYNC_BRANCH
           Source workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Protected child-specific files are not overwritten by this sync, including live config/serverConfig.js and live config/guildConfigs/*.js.
 
           Review before merging, especially if this child bot has custom files."
