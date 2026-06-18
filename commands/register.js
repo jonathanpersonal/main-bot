@@ -3,7 +3,8 @@ const {
   ModalBuilder,
   SlashCommandBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  MessageFlags
 } = require('discord.js');
 const { getServerConfig } = require('../utils/configUtils');
 const { getMemberRank } = require('../utils/rankUtils');
@@ -54,7 +55,7 @@ module.exports = {
     if (registrationConfig.enabled === false) {
       return interaction.reply({
         content: 'Officer registration is currently disabled for this server.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -63,7 +64,7 @@ module.exports = {
     if (!googleConfig.enabled) {
       return interaction.reply({
         content: 'Google integration is not configured. Add `GOOGLE_SCRIPT_WEBAPP_URL` and `GOOGLE_SCRIPT_SECRET`, then restart the bot.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -74,7 +75,7 @@ module.exports = {
     if (mode === 'OTHER' && !canRegisterOther(interaction.member, serverConfig)) {
       return interaction.reply({
         content: 'You do not have permission to register other officers.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -86,7 +87,7 @@ module.exports = {
     if (!targetMember) {
       return interaction.reply({
         content: 'That officer could not be found in this server.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -95,7 +96,7 @@ module.exports = {
     if (!detectedRank) {
       return interaction.reply({
         content: `${targetUser} does not have a configured rank role, so registration cannot continue.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -119,7 +120,7 @@ module.exports = {
     if (!googleConfig.enabled) {
       await interaction.reply({
         content: 'Google integration is not configured. Add `GOOGLE_SCRIPT_WEBAPP_URL` and `GOOGLE_SCRIPT_SECRET`, then restart the bot.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -127,7 +128,7 @@ module.exports = {
     if (mode === 'OTHER' && !canRegisterOther(interaction.member, serverConfig)) {
       await interaction.reply({
         content: 'You do not have permission to register other officers.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -137,7 +138,7 @@ module.exports = {
     if (!targetMember) {
       await interaction.reply({
         content: 'That officer could not be found in this server.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -147,7 +148,7 @@ module.exports = {
     if (!detectedRank) {
       await interaction.reply({
         content: `${targetMember} does not have a configured rank role, so registration cannot continue.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
@@ -161,12 +162,12 @@ module.exports = {
     if (errors.length > 0) {
       await interaction.reply({
         content: ['Registration could not be submitted:', ...errors.map((error) => `- ${error}`)].join('\n'),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return true;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       const cleanName = cleanDisplayName(

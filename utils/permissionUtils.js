@@ -1,4 +1,4 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getServerConfig } = require('./configUtils');
 
 function cleanRoleIds(values = []) {
@@ -257,7 +257,7 @@ async function safePermissionReply(interaction, message) {
 
   const payload = {
     content: message,
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   };
 
   try {

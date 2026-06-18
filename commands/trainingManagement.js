@@ -7,7 +7,8 @@ const {
   SlashCommandBuilder,
   StringSelectMenuBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  MessageFlags
 } = require('discord.js');
 
 const { getServerConfig } = require('../utils/configUtils');
@@ -52,15 +53,15 @@ module.exports = {
     const officerUser = interaction.options.getUser('officer');
 
     if (!interaction.guild) {
-      return interaction.reply({ content: 'This command can only be used inside a Discord server.', ephemeral: true });
+      return interaction.reply({ content: 'This command can only be used inside a Discord server.', flags: MessageFlags.Ephemeral });
     }
 
     if (trainingConfig.enabled === false) {
-      return interaction.reply({ content: 'Training management is currently disabled for this server.', ephemeral: true });
+      return interaction.reply({ content: 'Training management is currently disabled for this server.', flags: MessageFlags.Ephemeral });
     }
 
     if (!memberCanUseTraining(interaction.member, serverConfig)) {
-      return interaction.reply({ content: 'You are not authorized to use training management.', ephemeral: true });
+      return interaction.reply({ content: 'You are not authorized to use training management.', flags: MessageFlags.Ephemeral });
     }
 
     if (['review_approve', 'review_deny', 'complete_pass', 'complete_fail'].includes(action)) {
@@ -80,14 +81,14 @@ module.exports = {
       return interaction.reply({
         content: `Select application decision for ${officerUser}.`,
         components: [buildApplicationDecisionRow({ serverConfig, sessionId, staffId: interaction.user.id, officerId: officerUser.id })],
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
     return interaction.reply({
       content: buildCadetGuideMessage(serverConfig, officerUser),
       components: buildCadetStartRows({ serverConfig, sessionId, staffId: interaction.user.id, officerId: officerUser.id }),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   },
 
@@ -114,9 +115,9 @@ module.exports = {
 
 async function handleDirectTrainingAction(interaction, action, officerUser, serverConfig) {
   const officerMember = await interaction.guild.members.fetch(officerUser.id).catch(() => null);
-  if (!officerMember) return interaction.reply({ content: 'That user is not in this server.', ephemeral: true });
+  if (!officerMember) return interaction.reply({ content: 'That user is not in this server.', flags: MessageFlags.Ephemeral });
   const reason = interaction.options.getString('reason') || '';
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   if ((action === 'review_approve' || action === 'review_deny') && !canManageTraining(interaction.member, serverConfig, 'command')) {
     return interaction.editReply('You need a configured training command/command staff role to approve or deny applicants.');
   }
@@ -158,7 +159,7 @@ async function handleApplicationModal(interaction) {
   if (!state) return true;
   state.outcomeId = decisionId;
   state.details = getApplicationModalDetails(interaction, decisionId);
-  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('app', decisionId, staffId, officerId, sessionId)], ephemeral: true });
+  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('app', decisionId, staffId, officerId, sessionId)], flags: MessageFlags.Ephemeral });
   return true;
 }
 
@@ -180,7 +181,7 @@ async function handleCadetReviewModal(interaction) {
     improvementNotes: getField(interaction, 'improvementNotes'),
     additionalNotes: getField(interaction, 'additionalNotes')
   };
-  await interaction.reply({ content: `Choose training outcome for <@${officerId}>.`, components: [buildCadetOutcomeRow({ serverConfig: getServerConfig(interaction.guildId), sessionId, staffId, officerId })], ephemeral: true });
+  await interaction.reply({ content: `Choose training outcome for <@${officerId}>.`, components: [buildCadetOutcomeRow({ serverConfig: getServerConfig(interaction.guildId), sessionId, staffId, officerId })], flags: MessageFlags.Ephemeral });
   return true;
 }
 
@@ -201,7 +202,7 @@ async function handleCadetExtraModal(interaction) {
   const state = getStateOrReply(interaction, sessionId, staffId, officerId);
   if (!state) return true;
   Object.assign(state.details, getCadetExtraModalDetails(interaction, outcomeId));
-  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('cadet', outcomeId, staffId, officerId, sessionId)], ephemeral: true });
+  await interaction.reply({ content: buildConfirmationMessage({ state, serverConfig: getServerConfig(interaction.guildId) }), components: [buildConfirmRow('cadet', outcomeId, staffId, officerId, sessionId)], flags: MessageFlags.Ephemeral });
   return true;
 }
 
@@ -360,7 +361,7 @@ function buildSuccessMessage({ flow, officerUser, cfg, roleResult, dmStatus, goo
 async function sendTrainingDm({ officerUser, serverConfig, flow, outcomeId, outcomeConfig, details, roleResult }) { const globalDm = serverConfig.trainingManagement?.dmEnabled !== false; if (!globalDm || outcomeConfig.dmEnabled === false || !outcomeConfig.dmMessage) return 'Disabled'; const values = buildDmValues({ officerUser, serverConfig, details, roleResult }); try { await officerUser.send({ content: formatTemplate(outcomeConfig.dmMessage, values) }); return 'Yes'; } catch (error) { console.warn(`Could not DM officer for training ${flow}/${outcomeId}:`, error); return 'No'; } }
 function buildDmValues({ officerUser, serverConfig, details, roleResult }) { const departmentName = serverConfig.trainingManagement?.departmentName || serverConfig.officerManagement?.departmentName || serverConfig.departmentName || 'the department'; return { officerName: officerUser.globalName || officerUser.username || officerUser.tag || String(officerUser.id), departmentName, commandTeamName: serverConfig.trainingManagement?.commandTeamName || serverConfig.officerManagement?.commandTeamName || `${departmentName} Command Team`, trainingName: 'Cadet Training', trainerName: '', rating: details.rating || '', performanceComments: details.performanceComments || '', whatWentWell: details.whatWentWell || '', improvementNotes: details.improvementNotes || '', additionalNotes: details.additionalNotes || '', reason: details.reason || 'None provided.', comments: details.comments || details.performanceSummary || 'None provided.', callsignLine: 'Your callsign will be assigned later by command.', roleChangeSummary: formatRoleChangeResult(roleResult) }; }
 function formatTemplate(template, values) { return template.replace(/\{([a-zA-Z]+)\}/g, (match, key) => values[key] ?? match); }
-function getStateOrReply(interaction, sessionId, staffId, officerId) { const state = pendingTrainingActions.get(sessionId); if (!state || state.staffUserId !== interaction.user.id || state.staffUserId !== staffId || state.officerUserId !== officerId) { interaction.reply({ content: 'This training management workflow expired or does not belong to you. Please run the command again.', ephemeral: true }).catch(() => {}); return null; } return state; }
+function getStateOrReply(interaction, sessionId, staffId, officerId) { const state = pendingTrainingActions.get(sessionId); if (!state || state.staffUserId !== interaction.user.id || state.staffUserId !== staffId || state.officerUserId !== officerId) { interaction.reply({ content: 'This training management workflow expired or does not belong to you. Please run the command again.', flags: MessageFlags.Ephemeral }).catch(() => {}); return null; } return state; }
 function createSessionId() { return `tm${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`; }
 function unique(values) { return [...new Set(values.filter((value) => value && typeof value === 'string' && !value.startsWith('PUT_') && !value.startsWith('PASTE_')))]; }
 function formatRoleIds(roleIds = []) { return unique(roleIds).map((id) => `<@&${id}>`).join(', ') || 'None'; }

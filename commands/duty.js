@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
 const { getServerConfig } = require('../utils/configUtils');
 let serverConfig = getServerConfig();
 const { getMemberRank } = require('../utils/rankUtils');
@@ -130,7 +130,7 @@ module.exports = {
     if (!serverConfig?.duty?.enabled) {
       return interaction.reply({
         content: 'Duty tracking is currently disabled for this server.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
     }
 
@@ -151,7 +151,7 @@ module.exports = {
       if (subcommand === 'loa-sync') return handleLoaSync(interaction);
       if (subcommand === 'activity-status') return handleActivityStatus(interaction);
 
-      return interaction.reply({ content: 'Unknown duty subcommand.', ephemeral: true });
+      return interaction.reply({ content: 'Unknown duty subcommand.', flags: MessageFlags.Ephemeral });
     } catch (error) {
       console.error('Duty command error:', error);
       return replyFriendlyError(interaction);
@@ -169,7 +169,7 @@ async function handleClockIn(interaction) {
   if (!dutyType) {
     return interaction.reply({
       content: 'That duty type is not configured for this server.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -179,7 +179,7 @@ async function handleClockIn(interaction) {
     const clockInUnix = toUnix(activeSession.clock_in_at);
     return interaction.reply({
       content: `You are already clocked in since <t:${clockInUnix}:f> (<t:${clockInUnix}:R>).`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -207,7 +207,7 @@ async function handleClockIn(interaction) {
     ])
     .setTimestamp(clockInAt);
 
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function handleClockOut(interaction) {
@@ -216,7 +216,7 @@ async function handleClockOut(interaction) {
   if (!activeSession) {
     return interaction.reply({
       content: 'You are not currently clocked in.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -279,7 +279,7 @@ async function handleClockOut(interaction) {
       ? 'You have been clocked out. I sent you a DM with your timecard summary.'
       : 'You have been clocked out. I could not send your DM summary, but your timecard was saved.'}${rideAlongReminder}`,
     embeds: [summaryEmbed],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -289,7 +289,7 @@ async function handleStatus(interaction) {
   if (!activeSession) {
     return interaction.reply({
       content: 'You are currently off duty.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -307,7 +307,7 @@ async function handleStatus(interaction) {
       { name: 'Elapsed', value: formatDuration(elapsedSeconds), inline: true }
     ]);
 
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function handleRecent(interaction) {
@@ -316,7 +316,7 @@ async function handleRecent(interaction) {
   if (timecards.length === 0) {
     return interaction.reply({
       content: 'You do not have any completed duty timecards yet.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -334,20 +334,20 @@ async function handleRecent(interaction) {
     .setColor(DUTY_EMBED_COLOR)
     .setDescription(lines.join('\n\n'));
 
-  return interaction.reply({ embeds: [embed], ephemeral: true });
+  return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 
 async function handleCorrection(interaction) {
   const correctionConfig = serverConfig?.duty?.corrections || {};
-  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', ephemeral: true });
-  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', ephemeral: true });
+  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', flags: MessageFlags.Ephemeral });
+  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', flags: MessageFlags.Ephemeral });
 
   const manualTimecardId = interaction.options.getString('timecard-id')?.trim();
   if (manualTimecardId) {
-    if (!correctionConfig.allowManualTimecardId) return interaction.reply({ content: 'Manual timecard ID correction requests are not enabled for this server.', ephemeral: true });
+    if (!correctionConfig.allowManualTimecardId) return interaction.reply({ content: 'Manual timecard ID correction requests are not enabled for this server.', flags: MessageFlags.Ephemeral });
     const timecard = await getTimecardById(interaction.guildId, manualTimecardId);
-    if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', ephemeral: true });
+    if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', flags: MessageFlags.Ephemeral });
     return interaction.showModal(buildCorrectionModal(timecard.timecard_id));
   }
 
@@ -355,7 +355,7 @@ async function handleCorrection(interaction) {
   const timecards = await getRecentTimecards(interaction.guildId, interaction.user.id, limit);
   if (timecards.length === 0) {
     const manualMessage = correctionConfig.allowManualTimecardId ? ' You can also run `/duty correction timecard-id:TC-...` if you know the timecard ID.' : '';
-    return interaction.reply({ content: `You do not have any recent completed duty timecards to correct.${manualMessage}`, ephemeral: true });
+    return interaction.reply({ content: `You do not have any recent completed duty timecards to correct.${manualMessage}`, flags: MessageFlags.Ephemeral });
   }
 
   const select = new StringSelectMenuBuilder()
@@ -373,19 +373,19 @@ async function handleCorrection(interaction) {
   const content = correctionConfig.allowManualTimecardId
     ? 'Select one of your recent completed timecards, or run `/duty correction timecard-id:TC-...` to enter a specific timecard ID.'
     : 'Select one of your recent completed timecards.';
-  return interaction.reply({ content, components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+  return interaction.reply({ content, components: [new ActionRowBuilder().addComponents(select)], flags: MessageFlags.Ephemeral });
 }
 
 async function handleSelectMenu(interaction) {
   if (interaction.customId !== 'duty_correction_select') return false;
-  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
   const correctionConfig = serverConfig?.duty?.corrections || {};
-  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', ephemeral: true }).then(() => true);
-  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', ephemeral: true }).then(() => true);
+  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const timecardId = interaction.values[0];
   const timecard = await getTimecardById(interaction.guildId, timecardId);
-  if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', ephemeral: true }).then(() => true);
+  if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   await interaction.showModal(buildCorrectionModal(timecard.timecard_id));
   return true;
@@ -393,23 +393,23 @@ async function handleSelectMenu(interaction) {
 
 async function handleRideAlong(interaction) {
   const feedbackConfig = serverConfig?.duty?.rideAlongFeedback || {};
-  if (!feedbackConfig.enabled) return interaction.reply({ content: 'Ride-along feedback is not enabled for this server.', ephemeral: true });
+  if (!feedbackConfig.enabled) return interaction.reply({ content: 'Ride-along feedback is not enabled for this server.', flags: MessageFlags.Ephemeral });
 
   const officer = interaction.options.getUser('officer', true);
-  if (officer.id === interaction.user.id) return interaction.reply({ content: 'You cannot submit ride-along feedback about yourself.', ephemeral: true });
+  if (officer.id === interaction.user.id) return interaction.reply({ content: 'You cannot submit ride-along feedback about yourself.', flags: MessageFlags.Ephemeral });
 
   const probationaryMember = await interaction.guild.members.fetch(officer.id).catch(() => null);
-  if (!probationaryMember) return interaction.reply({ content: 'That officer could not be found in this server.', ephemeral: true });
+  if (!probationaryMember) return interaction.reply({ content: 'That officer could not be found in this server.', flags: MessageFlags.Ephemeral });
 
   const reviewerRank = getRankSafely(interaction.member);
   const minimumLevel = Number(feedbackConfig.minReviewerRankLevel || 2);
   const rankAllowed = Number(reviewerRank?.level || 0) >= minimumLevel;
   const roleAllowed = memberHasAnyRole(interaction.member, feedbackConfig.reviewerRoleIds || []);
-  if (!rankAllowed && !roleAllowed) return interaction.reply({ content: 'You do not have permission to submit ride-along feedback.', ephemeral: true });
+  if (!rankAllowed && !roleAllowed) return interaction.reply({ content: 'You do not have permission to submit ride-along feedback.', flags: MessageFlags.Ephemeral });
 
   const probationaryRoleIds = feedbackConfig.probationaryRoleIds || [];
   if (feedbackConfig.requireTargetProbationary && probationaryRoleIds.length > 0 && !memberHasAnyRole(probationaryMember, probationaryRoleIds)) {
-    return interaction.reply({ content: 'That officer is not configured as a Probationary Officer for ride-along feedback.', ephemeral: true });
+    return interaction.reply({ content: 'That officer is not configured as a Probationary Officer for ride-along feedback.', flags: MessageFlags.Ephemeral });
   }
 
   return interaction.showModal(buildRideAlongFeedbackModal(officer.id));
@@ -417,8 +417,8 @@ async function handleRideAlong(interaction) {
 
 async function handleLoa(interaction) {
   const loaConfig = serverConfig?.duty?.loa || {};
-  if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', ephemeral: true });
-  if (!loaConfig.approvalChannelId) return interaction.reply({ content: 'The LOA approval channel has not been configured.', ephemeral: true });
+  if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', flags: MessageFlags.Ephemeral });
+  if (!loaConfig.approvalChannelId) return interaction.reply({ content: 'The LOA approval channel has not been configured.', flags: MessageFlags.Ephemeral });
 
   const modal = new ModalBuilder().setCustomId('duty_loa_request').setTitle('LOA Request');
   modal.addComponents(
@@ -433,11 +433,11 @@ async function handleLoa(interaction) {
 async function handleLoaSync(interaction) {
   const loaConfig = serverConfig?.duty?.loa || {};
   const approverRoleIds = loaConfig.approverRoleIds || [];
-  if (!approverRoleIds.length) return interaction.reply({ content: 'LOA approver roles are not configured.', ephemeral: true });
-  if (!memberHasAnyRole(interaction.member, approverRoleIds)) return interaction.reply({ content: 'You do not have permission to run LOA sync.', ephemeral: true });
+  if (!approverRoleIds.length) return interaction.reply({ content: 'LOA approver roles are not configured.', flags: MessageFlags.Ephemeral });
+  if (!memberHasAnyRole(interaction.member, approverRoleIds)) return interaction.reply({ content: 'You do not have permission to run LOA sync.', flags: MessageFlags.Ephemeral });
 
   const dryRun = interaction.options.getBoolean('dry-run') || false;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const summary = await runLoaDailySync(interaction.client, { guildId: interaction.guildId, dryRun, triggeredBy: interaction.user.id });
   const details = summary.details.slice(0, 8).map((detail) => `- ${detail.loaId}: ${detail.message}`).join('\n') || '- No LOAs needed action.';
   return interaction.editReply(`LOA Sync Complete\n\nMode: ${dryRun ? 'Dry Run' : 'Live'}\nAdded: ${summary.added}\nRemoved: ${summary.removed}\nAlready correct: ${summary.alreadyCorrect}\nSkipped: ${summary.skipped}\nErrors: ${summary.errors}\n\nDetails:\n${details}`);
@@ -451,21 +451,21 @@ async function handleActivityReport(interaction) {
     const activityConfig = serverConfig?.duty?.activity || {};
     console.log('[activity-report] config loaded');
 
-    if (!activityConfig.enabled) return interaction.reply({ content: 'Activity reporting is not enabled for this server.', ephemeral: true });
-    if (!memberCanUseActivity(interaction.member)) return interaction.reply({ content: 'You do not have permission to run activity reports. Activity approver roles are not configured or you do not have one.', ephemeral: true });
+    if (!activityConfig.enabled) return interaction.reply({ content: 'Activity reporting is not enabled for this server.', flags: MessageFlags.Ephemeral });
+    if (!memberCanUseActivity(interaction.member)) return interaction.reply({ content: 'You do not have permission to run activity reports. Activity approver roles are not configured or you do not have one.', flags: MessageFlags.Ephemeral });
     if (!Array.isArray(activityConfig.includeRoleIds) || activityConfig.includeRoleIds.length === 0) {
-      return interaction.reply({ content: 'Activity includeRoleIds is not configured. Add a department/test role before running the report.', ephemeral: true });
+      return interaction.reply({ content: 'Activity includeRoleIds is not configured. Add a department/test role before running the report.', flags: MessageFlags.Ephemeral });
     }
 
     const cycleRange = getRequestedCycleRange(interaction, activityConfig);
-    if (cycleRange.error) return interaction.reply({ content: cycleRange.error, ephemeral: true });
+    if (cycleRange.error) return interaction.reply({ content: cycleRange.error, flags: MessageFlags.Ephemeral });
     console.log('[activity-report] cycle dates parsed', {
       cycleStart: formatDateOnly(cycleRange.cycleStart),
       cycleEnd: formatDateOnly(cycleRange.cycleEnd)
     });
 
     const dryRun = interaction.options.getBoolean('dry-run') ?? true;
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     deferred = true;
 
     await withActivityTimeout(ensureDutyTables(), 10000, 'Activity database setup took too long. Please try again in a moment.');
@@ -582,7 +582,7 @@ async function handleActivityReport(interaction) {
       console.log('[activity-report] report response sent');
       return;
     }
-    await interaction.reply({ content: message, ephemeral: true }).catch((replyError) => console.error('[activity-report] failed to send error reply:', replyError.message || replyError));
+    await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch((replyError) => console.error('[activity-report] failed to send error reply:', replyError.message || replyError));
   }
 }
 
@@ -753,11 +753,11 @@ async function handleActivityReviewButton(interaction) {
   if (!memberCanUseActivity(interaction.member)) {
     return interaction.reply({
       embeds: [buildSimpleEmbed('Activity Review', 'You do not have permission to review activity findings.', ERROR_EMBED_COLOR)],
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     }).then(() => true);
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await ensureDutyTables();
 
   const finding = await resolveActivityFindingReview({
@@ -973,14 +973,14 @@ function buildSimpleEmbed(title, description, color = DUTY_EMBED_COLOR) {
 
 async function handleActivityStatus(interaction) {
   const activityConfig = serverConfig?.duty?.activity || {};
-  if (!activityConfig.enabled) return interaction.reply({ content: 'Activity reporting is not enabled for this server.', ephemeral: true });
-  if (!memberCanUseActivity(interaction.member)) return interaction.reply({ content: 'You do not have permission to check activity status. Activity approver roles are not configured or you do not have one.', ephemeral: true });
+  if (!activityConfig.enabled) return interaction.reply({ content: 'Activity reporting is not enabled for this server.', flags: MessageFlags.Ephemeral });
+  if (!memberCanUseActivity(interaction.member)) return interaction.reply({ content: 'You do not have permission to check activity status. Activity approver roles are not configured or you do not have one.', flags: MessageFlags.Ephemeral });
 
   const cycleRange = getRequestedCycleRange(interaction, activityConfig);
-  if (cycleRange.error) return interaction.reply({ content: cycleRange.error, ephemeral: true });
+  if (cycleRange.error) return interaction.reply({ content: cycleRange.error, flags: MessageFlags.Ephemeral });
 
   const officer = interaction.options.getUser('officer', true);
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const finding = await calculateOfficerActivity({
     guild: interaction.guild,
@@ -1076,9 +1076,9 @@ async function handleModalSubmit(interaction) {
   if (interaction.customId.startsWith('duty_ridealong_feedback:')) return handleRideAlongFeedbackModalSubmit(interaction);
   if (interaction.customId.startsWith('duty_correction_modal:')) return handleCorrectionModalSubmit(interaction);
   if (interaction.customId !== 'duty_loa_request') return false;
-  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
   const loaConfig = serverConfig?.duty?.loa || {};
-  if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', ephemeral: true }).then(() => true);
+  if (!loaConfig.enabled) return interaction.reply({ content: 'LOA requests are not enabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const startDateValue = interaction.fields.getTextInputValue('start_date').trim();
   const endDateValue = interaction.fields.getTextInputValue('end_date').trim();
@@ -1086,19 +1086,19 @@ async function handleModalSubmit(interaction) {
   const comments = interaction.fields.getTextInputValue('comments')?.trim() || '';
   const startDate = parseDateInput(startDateValue);
   const endDate = parseDateInput(endDateValue);
-  if (!startDate) return interaction.reply({ content: 'Start date must be valid and use YYYY-MM-DD.', ephemeral: true }).then(() => true);
-  if (!endDate) return interaction.reply({ content: 'End date must be valid and use YYYY-MM-DD.', ephemeral: true }).then(() => true);
-  if (endDate < startDate) return interaction.reply({ content: 'End date cannot be before start date.', ephemeral: true }).then(() => true);
-  if (!reason) return interaction.reply({ content: 'Reason is required.', ephemeral: true }).then(() => true);
+  if (!startDate) return interaction.reply({ content: 'Start date must be valid and use YYYY-MM-DD.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!endDate) return interaction.reply({ content: 'End date must be valid and use YYYY-MM-DD.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (endDate < startDate) return interaction.reply({ content: 'End date cannot be before start date.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!reason) return interaction.reply({ content: 'Reason is required.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const durationDays = calculateDurationDays(startDateValue, endDateValue);
-  if (durationDays < (loaConfig.minDays || 7)) return interaction.reply({ content: `LOA requests must be at least ${loaConfig.minDays || 7} days.`, ephemeral: true }).then(() => true);
+  if (durationDays < (loaConfig.minDays || 7)) return interaction.reply({ content: `LOA requests must be at least ${loaConfig.minDays || 7} days.`, flags: MessageFlags.Ephemeral }).then(() => true);
 
   await ensureDutyTables();
   const loa = await createLoaRequest({ guildId: interaction.guildId, userId: interaction.user.id, startDate: startDateValue, endDate: endDateValue, durationDays, reason, comments });
   const exceptionRequired = durationDays > (loaConfig.maxDaysWithoutCommandException || 60);
   const approvalChannel = await interaction.guild.channels.fetch(loaConfig.approvalChannelId).catch(() => null);
-  if (!approvalChannel || typeof approvalChannel.send !== 'function') return interaction.reply({ content: 'The configured LOA approval channel could not be found.', ephemeral: true }).then(() => true);
+  if (!approvalChannel || typeof approvalChannel.send !== 'function') return interaction.reply({ content: 'The configured LOA approval channel could not be found.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const message = await approvalChannel.send({ embeds: [buildLoaEmbed(loa, 'Pending', exceptionRequired)], components: [buildLoaButtons(loa.loa_id, false)] });
   await updateLoaApprovalMessage({ loaId: loa.loa_id, channelId: message.channel.id, messageId: message.id });
@@ -1107,7 +1107,7 @@ async function handleModalSubmit(interaction) {
     reviewedByDiscordId: interaction.user.id,
     loaStatus: 'pending'
   }));
-  await interaction.reply({ content: `Your LOA request has been submitted for staff approval. LOA ID: ${loa.loa_id}`, ephemeral: true });
+  await interaction.reply({ content: `Your LOA request has been submitted for staff approval. LOA ID: ${loa.loa_id}`, flags: MessageFlags.Ephemeral });
   return true;
 }
 
@@ -1118,11 +1118,11 @@ async function handleButton(interaction) {
   const [action, loaId] = interaction.customId.split(':');
   const loaConfig = serverConfig?.duty?.loa || {};
   const approverRoleIds = loaConfig.approverRoleIds || [];
-  if (!approverRoleIds.length) return interaction.reply({ content: 'LOA approver roles are not configured.', ephemeral: true }).then(() => true);
-  if (!memberHasAnyRole(interaction.member, approverRoleIds)) return interaction.reply({ content: 'You do not have permission to review LOA requests.', ephemeral: true }).then(() => true);
+  if (!approverRoleIds.length) return interaction.reply({ content: 'LOA approver roles are not configured.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!memberHasAnyRole(interaction.member, approverRoleIds)) return interaction.reply({ content: 'You do not have permission to review LOA requests.', flags: MessageFlags.Ephemeral }).then(() => true);
   // TODO: Replace button-only review with a notes modal for approval/denial notes.
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const existing = await getLoaRequestById(loaId);
   if (!existing) { await interaction.editReply('That LOA request could not be found.'); return true; }
   if (existing.status !== 'pending') { await interaction.editReply(`That LOA request is already ${existing.status}.`); return true; }
@@ -1173,24 +1173,24 @@ function buildRideAlongFeedbackModal(probationaryUserId) {
 }
 
 async function handleRideAlongFeedbackModalSubmit(interaction) {
-  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
   const feedbackConfig = serverConfig?.duty?.rideAlongFeedback || {};
-  if (!feedbackConfig.enabled) return interaction.reply({ content: 'Ride-along feedback is not enabled for this server.', ephemeral: true }).then(() => true);
+  if (!feedbackConfig.enabled) return interaction.reply({ content: 'Ride-along feedback is not enabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const [, probationaryUserId] = interaction.customId.split(':');
-  if (!probationaryUserId || probationaryUserId === interaction.user.id) return interaction.reply({ content: 'You cannot submit ride-along feedback about yourself.', ephemeral: true }).then(() => true);
+  if (!probationaryUserId || probationaryUserId === interaction.user.id) return interaction.reply({ content: 'You cannot submit ride-along feedback about yourself.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const reviewerRank = getRankSafely(interaction.member);
   const minimumLevel = Number(feedbackConfig.minReviewerRankLevel || 2);
   const rankAllowed = Number(reviewerRank?.level || 0) >= minimumLevel;
   const roleAllowed = memberHasAnyRole(interaction.member, feedbackConfig.reviewerRoleIds || []);
-  if (!rankAllowed && !roleAllowed) return interaction.reply({ content: 'You do not have permission to submit ride-along feedback.', ephemeral: true }).then(() => true);
+  if (!rankAllowed && !roleAllowed) return interaction.reply({ content: 'You do not have permission to submit ride-along feedback.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const probationaryMember = await interaction.guild.members.fetch(probationaryUserId).catch(() => null);
-  if (!probationaryMember) return interaction.reply({ content: 'That officer could not be found in this server.', ephemeral: true }).then(() => true);
+  if (!probationaryMember) return interaction.reply({ content: 'That officer could not be found in this server.', flags: MessageFlags.Ephemeral }).then(() => true);
   const probationaryRoleIds = feedbackConfig.probationaryRoleIds || [];
   if (feedbackConfig.requireTargetProbationary && probationaryRoleIds.length > 0 && !memberHasAnyRole(probationaryMember, probationaryRoleIds)) {
-    return interaction.reply({ content: 'That officer is not configured as a Probationary Officer for ride-along feedback.', ephemeral: true }).then(() => true);
+    return interaction.reply({ content: 'That officer is not configured as a Probationary Officer for ride-along feedback.', flags: MessageFlags.Ephemeral }).then(() => true);
   }
 
   const ratingValue = interaction.fields.getTextInputValue('rating').trim();
@@ -1199,8 +1199,8 @@ async function handleRideAlongFeedbackModalSubmit(interaction) {
   const improveOn = interaction.fields.getTextInputValue('improve_on').trim();
   const rating = Number(ratingValue);
 
-  if (!Number.isInteger(rating) || rating < 1 || rating > 10) return interaction.reply({ content: 'Rating must be a whole number from 1 to 10.', ephemeral: true }).then(() => true);
-  if (!generalComments || !didWell || !improveOn) return interaction.reply({ content: 'General comments, what they did well, and what they could improve on are required.', ephemeral: true }).then(() => true);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 10) return interaction.reply({ content: 'Rating must be a whole number from 1 to 10.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!generalComments || !didWell || !improveOn) return interaction.reply({ content: 'General comments, what they did well, and what they could improve on are required.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   await ensureDutyTables();
   const ridealongDate = formatDateOnly(new Date());
@@ -1227,7 +1227,7 @@ async function handleRideAlongFeedbackModalSubmit(interaction) {
     if (officerUser) await officerUser.send('Ride-along feedback has been submitted for you and will be reviewed by the training team.').catch(() => null);
   }
 
-  await interaction.reply({ content: `Ride-along feedback submitted. Feedback ID: ${feedback.feedback_id}`, ephemeral: true });
+  await interaction.reply({ content: `Ride-along feedback submitted. Feedback ID: ${feedback.feedback_id}`, flags: MessageFlags.Ephemeral });
   return true;
 }
 
@@ -1284,25 +1284,25 @@ async function sendRideAlongFeedbackLog(interaction, embed) {
 
 async function handleCorrectionModalSubmit(interaction) {
   const [, timecardId] = interaction.customId.split(':');
-  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', ephemeral: true }).then(() => true);
+  if (!serverConfig?.duty?.enabled) return interaction.reply({ content: 'Duty tracking is currently disabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
   const correctionConfig = serverConfig?.duty?.corrections || {};
-  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', ephemeral: true }).then(() => true);
-  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', ephemeral: true }).then(() => true);
+  if (!correctionConfig.enabled) return interaction.reply({ content: 'Timecard corrections are not enabled for this server.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!correctionConfig.approvalChannelId) return interaction.reply({ content: 'The timecard correction approval channel has not been configured.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const requestedClockInAt = parseDateTimeInput(interaction.fields.getTextInputValue('correct_clock_in').trim());
   const requestedClockOutAt = parseDateTimeInput(interaction.fields.getTextInputValue('correct_clock_out').trim());
   const reason = interaction.fields.getTextInputValue('reason').trim();
   const notes = interaction.fields.getTextInputValue('notes')?.trim() || '';
 
-  if (!requestedClockInAt) return interaction.reply({ content: 'Correct clock-in time must be valid and use YYYY-MM-DD HH:mm.', ephemeral: true }).then(() => true);
-  if (!requestedClockOutAt) return interaction.reply({ content: 'Correct clock-out time must be valid and use YYYY-MM-DD HH:mm.', ephemeral: true }).then(() => true);
+  if (!requestedClockInAt) return interaction.reply({ content: 'Correct clock-in time must be valid and use YYYY-MM-DD HH:mm.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!requestedClockOutAt) return interaction.reply({ content: 'Correct clock-out time must be valid and use YYYY-MM-DD HH:mm.', flags: MessageFlags.Ephemeral }).then(() => true);
   const requestedDurationSeconds = calculateDurationSeconds(requestedClockInAt, requestedClockOutAt);
-  if (requestedDurationSeconds <= 0) return interaction.reply({ content: 'Correct clock-out time must be after the corrected clock-in time.', ephemeral: true }).then(() => true);
-  if (!reason) return interaction.reply({ content: 'Reason is required.', ephemeral: true }).then(() => true);
+  if (requestedDurationSeconds <= 0) return interaction.reply({ content: 'Correct clock-out time must be after the corrected clock-in time.', flags: MessageFlags.Ephemeral }).then(() => true);
+  if (!reason) return interaction.reply({ content: 'Reason is required.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   await ensureDutyTables();
   const timecard = await getTimecardById(interaction.guildId, timecardId);
-  if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', ephemeral: true }).then(() => true);
+  if (!timecard || timecard.user_id !== interaction.user.id) return interaction.reply({ content: 'That completed timecard could not be found under your account in this server.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const correction = await createTimecardCorrection({
     guildId: interaction.guildId,
@@ -1319,13 +1319,13 @@ async function handleCorrectionModalSubmit(interaction) {
   });
 
   const approvalChannel = await interaction.guild.channels.fetch(correctionConfig.approvalChannelId).catch(() => null);
-  if (!approvalChannel || typeof approvalChannel.send !== 'function') return interaction.reply({ content: 'The configured timecard correction approval channel could not be found.', ephemeral: true }).then(() => true);
+  if (!approvalChannel || typeof approvalChannel.send !== 'function') return interaction.reply({ content: 'The configured timecard correction approval channel could not be found.', flags: MessageFlags.Ephemeral }).then(() => true);
 
   const message = await approvalChannel.send({ embeds: [buildCorrectionEmbed(correction, 'Pending')], components: [buildCorrectionButtons(correction.correction_id, false)] });
   await updateCorrectionApprovalMessage({ correctionId: correction.correction_id, channelId: message.channel.id, messageId: message.id });
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Timecard correction submitted', fields: correctionLogFields(correction, interaction.user.id) });
   await submitDutyGoogleEvent(interaction, 'DUTY_TIMECARD_CORRECTION_SUBMITTED', { timecardId: timecard.timecard_id, correctionId: correction.correction_id, reason, notes });
-  await interaction.reply({ content: `Your timecard correction request has been submitted for staff approval. Correction ID: ${correction.correction_id}`, ephemeral: true });
+  await interaction.reply({ content: `Your timecard correction request has been submitted for staff approval. Correction ID: ${correction.correction_id}`, flags: MessageFlags.Ephemeral });
   return true;
 }
 
@@ -1333,14 +1333,14 @@ async function handleCorrectionButton(interaction) {
   const [action, correctionId] = interaction.customId.split(':');
   const correctionConfig = serverConfig?.duty?.corrections || {};
   const approverRoleIds = correctionConfig.approverRoleIds || [];
-  if (!approverRoleIds.length) return interaction.reply({ content: 'Timecard correction approver roles are not configured.', ephemeral: true }).then(() => true);
+  if (!approverRoleIds.length) return interaction.reply({ content: 'Timecard correction approver roles are not configured.', flags: MessageFlags.Ephemeral }).then(() => true);
   if (!memberHasAnyRole(interaction.member, approverRoleIds)) {
     await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'Timecard correction permission failure', fields: [{ name: 'Correction ID', value: correctionId, inline: true }, { name: 'Staff member', value: `<@${interaction.user.id}>`, inline: true }] });
-    return interaction.reply({ content: 'You do not have permission to review timecard corrections.', ephemeral: true }).then(() => true);
+    return interaction.reply({ content: 'You do not have permission to review timecard corrections.', flags: MessageFlags.Ephemeral }).then(() => true);
   }
   // TODO: Replace button-only review with a notes modal for approval/denial review notes.
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const existing = await getCorrectionById(correctionId);
   if (!existing) { await interaction.editReply('That timecard correction request could not be found.'); return true; }
   if (existing.status !== 'pending') { await interaction.editReply(`That timecard correction request is already ${existing.status}.`); return true; }
@@ -1564,7 +1564,7 @@ async function replyFriendlyError(interaction) {
         .setColor(ERROR_EMBED_COLOR)
         .setDescription('Something went wrong while handling your duty request. Please try again later or contact command staff.')
     ],
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   };
 
   if (interaction.replied || interaction.deferred) {
