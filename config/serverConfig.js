@@ -392,7 +392,7 @@ Internal Affairs Team`
     },
     {
       name: 'Sergeant',
-      rankRoleId: 'PASTE_SERGEANT_ROLE_ID_HERE',
+      rankRoleId: '1177028193203531807',
       permissionRoleId: 'PASTE_SERGEANT_PERMISSION_ROLE_ID_HERE',
       level: 4
     }
