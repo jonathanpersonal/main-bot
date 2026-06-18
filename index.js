@@ -3,7 +3,8 @@ require('dotenv').config();
 const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const ticketUtils = require('./utils/ticketUtils');
 const { loadCommands } = require('./handlers/commandHandler');
-const { validateServerConfig } = require('./utils/configUtils');
+const { getServerConfig, validateServerConfig } = require('./utils/configUtils');
+const { requireDevOnlyAccess, isDevOnlyEnabled } = require('./utils/permissionUtils');
 const { handleAppealInteraction } = require('./utils/appealUtils');
 const { startLoaDailySyncScheduler } = require('./utils/loaSync');
 const { startGooglePoller } = require('./services/googlePoller');
@@ -45,6 +46,11 @@ client.once(Events.ClientReady, (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.guildId) {
+    const config = getServerConfig(interaction.guildId);
+    if (isDevOnlyEnabled(config) && !await requireDevOnlyAccess(interaction, { config })) return;
+  }
+
   if (await handleTicketInteraction(interaction)) return;
 
   if (interaction.isButton() || interaction.isModalSubmit()) {
