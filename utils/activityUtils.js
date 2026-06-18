@@ -60,6 +60,17 @@ async function getDepartmentMembersForActivity(guild, config, deadline = Date.no
     throw new Error('Activity includeRoleIds is not configured. Add a department/test role before running the report.');
   }
 
+  const fetchRemainingMs = deadline - Date.now();
+  if (fetchRemainingMs > 0) {
+    await withActivityTimeout(
+      guild.members.fetch(),
+      fetchRemainingMs,
+      'Guild member fetch timed out before activity role filtering.'
+    ).catch((error) => {
+      console.warn('[activity-report] guild member fetch failed; falling back to cached role members:', error.message || error);
+    });
+  }
+
   for (const roleId of includeRoleIds) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
