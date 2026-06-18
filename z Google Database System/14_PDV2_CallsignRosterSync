@@ -43,7 +43,6 @@ function pdv2RegistryUpdates_(row, updates) {
 
 function pdv2RosterSyncLog_(runId, event, message, meta) {
   pdv2Log_('INFO', runId, event, message, meta || {});
-  try { SpreadsheetApp.flush(); } catch (err) {}
 }
 
 function pdv2RegistryRowForHeaders_(headers, obj) {
@@ -61,6 +60,10 @@ function pdv2MergeRegistryRow_(existing, updates) {
     if (key.indexOf('__') !== 0) merged[key] = updates[key];
   });
   return merged;
+}
+
+function pdv2SlotIdForRosterCallsign_(callsign) {
+  return 'SLOT-ROSTER-' + pdv2NormalizeCallsign_(callsign);
 }
 
 function pdv2ApplyCallsignRegistryChanges_(adds, updates, runId, preview) {
@@ -143,7 +146,18 @@ function pdv2SyncCallsignRegistryFromDatabase_(options) {
   var registryAdds = [];
   var registryUpdates = [];
 
-  rosterRows.forEach(function(record) {
+  pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_COMPARE_START', 'Comparing roster rows to CallsignRegistry.', { rows: rosterRows.length });
+
+  rosterRows.forEach(function(record, index) {
+    if (index > 0 && index % 25 === 0) {
+      pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_COMPARE_PROGRESS', 'Roster compare in progress.', {
+        processed: index,
+        total: rosterRows.length,
+        adds: registryAdds.length,
+        updates: registryUpdates.length
+      });
+    }
+
     if ([record['Discord ID'], record['Name'], record['Username'], record['Rank'], record['Status'], record['Department'], record['Current Callsign']].join('').trim() === '') return;
     summary.scannedRosterRows++;
     var callsign = pdv2GetCallsignFromRosterRecord_(record);
@@ -159,7 +173,7 @@ function pdv2SyncCallsignRegistryFromDatabase_(options) {
       if (!registry) {
         summary.addedToRegistry++;
         registryAdds.push({
-          'Slot ID': pdv2GenerateId_('SLOT'), 'Callsign': callsign, 'Status': 'AVAILABLE', 'Slot Status': 'AVAILABLE',
+          'Slot ID': pdv2SlotIdForRosterCallsign_(callsign), 'Callsign': callsign, 'Status': 'AVAILABLE', 'Slot Status': 'AVAILABLE',
           'Assigned Discord ID': '', 'Assigned Name': '', 'Assigned Username': '', 'Assigned Rank': '',
           'Rank': record['Rank'], 'Department': record['Department'],
           'Assigned At': '', 'Assigned Date': '', 'Assigned By': '', 'Request ID': '',
@@ -204,7 +218,7 @@ function pdv2SyncCallsignRegistryFromDatabase_(options) {
     if (!registry) {
       summary.addedToRegistry++;
       registryAdds.push({
-        'Slot ID': pdv2GenerateId_('SLOT'), 'Callsign': callsign, 'Status': 'ASSIGNED', 'Slot Status': 'ASSIGNED',
+        'Slot ID': pdv2SlotIdForRosterCallsign_(callsign), 'Callsign': callsign, 'Status': 'ASSIGNED', 'Slot Status': 'ASSIGNED',
         'Assigned Discord ID': discordId, 'Assigned Name': record['Name'], 'Assigned Username': record['Username'],
         'Assigned Rank': record['Rank'], 'Rank': record['Rank'], 'Department': record['Department'],
         'Assigned At': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()), 'Assigned Date': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()),

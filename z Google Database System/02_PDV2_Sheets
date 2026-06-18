@@ -180,15 +180,14 @@ function pdv2ConfiguredRosterSheetNames_() {
 function pdv2RosterSyncSheetLog_(runId, event, message, meta) {
   if (!runId || typeof pdv2Log_ !== 'function') return;
   pdv2Log_('INFO', runId, event, message, meta || {});
-  try { SpreadsheetApp.flush(); } catch (err) {}
 }
 
 function pdv2RosterSourceLayout_(sheetName) {
   var normalized = pdv2String_(sheetName).toLowerCase();
   if (normalized === pdv2String_(PDV2.DEFAULTS.ROSTER_PROBATIONARY_SHEET_NAME).toLowerCase() || normalized.indexOf('probationary') >= 0) {
-    return { callsignCol: 4, nameCol: 6, rankCol: 8, discordIdCol: 19, maxCol: 19 };
+    return { callsignCol: 4, nameCol: 6, rankCol: 8, discordIdCol: 21, maxCol: 21 };
   }
-  return { callsignCol: 4, nameCol: 6, rankCol: 8, discordIdCol: 26, maxCol: 26 };
+  return { callsignCol: 4, nameCol: 6, rankCol: 8, discordIdCol: 39, maxCol: 39 };
 }
 
 function pdv2ColumnLetter_(col) {
@@ -364,7 +363,7 @@ function pdv2FindRosterHeaderRow_(sh) {
   return best.score >= 6 ? best.row : 0;
 }
 
-function pdv2CanonicalRosterRecord_(row) {
+function pdv2CanonicalRosterRecord_(row, defaultDepartment) {
   row = row || {};
   var normalized = {
     __rowNumber: row.__rowNumber,
@@ -374,7 +373,7 @@ function pdv2CanonicalRosterRecord_(row) {
     'Username': pdv2Pick_(row, ['Username', 'USERNAME', 'Discord Username', 'Discord Name'], ''),
     'Discord ID': pdv2Pick_(row, ['Discord ID', 'DISCORD ID', 'Discord Id', 'DiscordID', 'User ID', 'Member ID'], ''),
     'Rank': pdv2Pick_(row, ['Rank', 'RANK', 'Current Rank', 'Position'], ''),
-    'Department': pdv2Pick_(row, ['Department', 'DEPARTMENT', 'Dept', 'Division'], pdv2GetConfigValue_('DEFAULT_DEPARTMENT_KEY', 'main')),
+    'Department': pdv2Pick_(row, ['Department', 'DEPARTMENT', 'Dept', 'Division'], defaultDepartment || 'main'),
     'Current Callsign': pdv2Pick_(row, ['Current Callsign', 'CURRENT CALLSIGN', 'Callsign', 'CALLSIGN', 'Call Sign', 'Unit Number', 'Unit', 'Badge Number', 'Badge'], ''),
     'Callsign Updated': pdv2Pick_(row, ['Callsign Updated', 'CALLSIGN UPDATED', 'Last Updated', 'Updated At'], '')
   };
@@ -396,6 +395,7 @@ function pdv2ListRosterRows_(runId) {
   var sheetNames = pdv2ConfiguredRosterSheetNames_();
   var rows = [];
   var missing = [];
+  var defaultDepartment = pdv2GetConfigValue_('DEFAULT_DEPARTMENT_KEY', 'main') || 'main';
 
   sheetNames.forEach(function(sheetName) {
     pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_SHEET_LOOKUP', 'Looking up roster source sheet.', { sheetName: sheetName });
@@ -404,7 +404,9 @@ function pdv2ListRosterRows_(runId) {
       missing.push(sheetName);
       return;
     }
-    rows = rows.concat(pdv2ListRowsFromExistingSheet_(sh, runId).map(pdv2CanonicalRosterRecord_));
+    rows = rows.concat(pdv2ListRowsFromExistingSheet_(sh, runId).map(function(row) {
+      return pdv2CanonicalRosterRecord_(row, defaultDepartment);
+    }));
   });
 
   if (missing.length) {

@@ -104,9 +104,16 @@ function pdv2MenuSyncCallsignRegistryFromDatabase() {
 
 function pdv2MenuDiagnoseRosterColumns() {
   var result = pdv2DiagnoseRosterColumns_();
+  var summary = (result.sheets || []).map(function(sheet) {
+    return sheet.sheetName + ': callsign ' + sheet.assumedLayout.callsign +
+      ', name ' + sheet.assumedLayout.name +
+      ', rank ' + sheet.assumedLayout.rank +
+      ', Discord ID ' + sheet.assumedLayout.discordId;
+  }).join('\n');
   SpreadsheetApp.getUi().alert(
     'Roster diagnostics written to ScriptLogs.\n\nRun ID:\n' + result.runId +
-    '\n\nCopy the ROSTER_DIAG_COMPLETE Meta JSON row back to Codex.'
+    '\n\nCurrent mapping:\n' + summary +
+    '\n\nCopy the ROSTER_DIAG_COMPLETE Meta JSON row back to Codex if this still looks wrong.'
   );
 }
 
