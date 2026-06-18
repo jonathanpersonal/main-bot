@@ -44,6 +44,12 @@ var PDV2 = {
     DEPARTMENTS: 'Departments',
     RANKS: 'Ranks',
     STAFF_ACCESS: 'StaffAccess',
+    DIVISIONS_CONFIG: 'DivisionsConfig',
+    CERTIFICATIONS_CONFIG: 'CertificationsConfig',
+    ROSTER_OPTIONS_CONFIG: 'RosterOptionsConfig',
+    PATROL_LOGS: 'PatrolLogs',
+    ACTIVITY_NOTICES: 'ActivityNotices',
+    CADET_TRACKER: 'CadetTracker',
     AUDIT_LOG: 'AuditLog',
     SCRIPT_LOGS: 'ScriptLogs'
   },
@@ -70,7 +76,19 @@ var PDV2 = {
       'Training Officer',
       'Probation Start',
       'Probation End',
-      'Notes'
+      'Notes',
+      'Date of Promotion',
+      'Current Cycle Hours',
+      'Previous Cycle Hours',
+      'Active Status',
+      'Department Status',
+      'Activity Notice Level',
+      'Activity Notice Reason',
+      'Activity Notice Issued At',
+      'Activity Notice Expires At',
+      'Activity Notice Issued By',
+      'Public Notes',
+      'Internal Notes'
     ],
 
     BotRequests: [
@@ -212,6 +230,96 @@ var PDV2 = {
       'Active',
       'Notes',
       'Updated At'
+    ],
+
+    DivisionsConfig: [
+      'DivisionKey',
+      'DivisionName',
+      'RosterColumnLabel',
+      'DiscordRoleId',
+      'Active',
+      'DisplayOrder',
+      'Notes'
+    ],
+
+    CertificationsConfig: [
+      'CertificationKey',
+      'CertificationName',
+      'RosterColumnLabel',
+      'DiscordRoleId',
+      'Active',
+      'DisplayOrder',
+      'Notes'
+    ],
+
+    RosterOptionsConfig: [
+      'OptionKey',
+      'OptionType',
+      'DisplayName',
+      'RosterGroup',
+      'RosterColumnLabel',
+      'DatabaseColumnName',
+      'DiscordRoleId',
+      'Active',
+      'DisplayOrder',
+      'Notes'
+    ],
+
+    PatrolLogs: [
+      'PatrolLogId',
+      'Discord ID',
+      'Name',
+      'Rank',
+      'Department',
+      'Patrol Type',
+      'Started At',
+      'Ended At',
+      'Duration Minutes',
+      'Duration Hours',
+      'Cycle Key',
+      'Logged By Discord ID',
+      'Source',
+      'Request ID',
+      'Notes',
+      'Created At',
+      'Updated At'
+    ],
+
+    ActivityNotices: [
+      'NoticeId',
+      'Discord ID',
+      'Name',
+      'Rank',
+      'Notice Type',
+      'Notice Level',
+      'Reason',
+      'Issued By Discord ID',
+      'Issued By Name',
+      'Issued At',
+      'Expires At',
+      'Status',
+      'Resolved At',
+      'Resolved By Discord ID',
+      'Request ID',
+      'Source',
+      'Notes',
+      'Created At',
+      'Updated At'
+    ],
+
+    CadetTracker: [
+      'Discord ID',
+      'Name',
+      'Date Joined',
+      'End Date',
+      'Trained?',
+      'Days Remaining',
+      'Current End Date',
+      'Status',
+      'Status Override',
+      'Modified By:',
+      'Name (DO NOT TOUCH)',
+      'Manual End Date'
     ],
 
     AuditLog: [

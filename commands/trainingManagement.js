@@ -11,6 +11,7 @@ const {
 } = require('discord.js');
 
 const { getServerConfig } = require('../utils/configUtils');
+const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 const { sendApplicationReviewLog, sendCadetTrainingLog } = require('../utils/logUtils');
 const { applyConfiguredRoleChanges, formatRoleChangeResult } = require('../utils/roleUtils');
 
@@ -194,7 +195,17 @@ async function handleTrainingConfirm(interaction) {
   const dmStatus = await sendTrainingDm({ officerUser, serverConfig, flow, outcomeId, outcomeConfig: cfg, details: state.details, roleResult });
   const logFn = flow === 'app' ? sendApplicationReviewLog : sendCadetTrainingLog;
   await logFn({ guild: interaction.guild, serverConfig, officerUser, staffUser: interaction.user, outcomeId, outcomeLabel: cfg.label || outcomeId, details: state.details, roleResult, dmStatus, ftoCommandMentions: buildFtoMentions(serverConfig, cfg), changedAt: new Date() });
-  // TODO: Later send application review decision to Google.
+  const googleResult = await submitAcceptedForTrainingEvent({
+    interaction,
+    officerUser,
+    officerMember,
+    flow,
+    outcomeId,
+    outcomeConfig: cfg,
+    details: state.details,
+    roleResult,
+    dmStatus
+  });
   // TODO: Later send cadet training pass/fail/incomplete result to Google.
   // TODO: Later send cadet training pass to Google webhook for callsign assignment.
   // TODO: Later handle Google response and DM officer with assigned callsign.
@@ -202,8 +213,53 @@ async function handleTrainingConfirm(interaction) {
   // TODO: Later handle Google callsign assignment response.
   // TODO: Later handle Steam group permission request if needed.
   pendingTrainingActions.delete(sessionId);
-  await interaction.editReply({ content: buildSuccessMessage({ flow, officerUser, cfg, roleResult, dmStatus }), components: [] });
+  await interaction.editReply({ content: buildSuccessMessage({ flow, officerUser, cfg, roleResult, dmStatus, googleResult }), components: [] });
   return true;
+}
+
+async function submitAcceptedForTrainingEvent({ interaction, officerUser, officerMember, flow, outcomeId, outcomeConfig, details, roleResult, dmStatus }) {
+  if (!isAcceptedForTrainingDecision(flow, outcomeId, outcomeConfig)) {
+    return null;
+  }
+
+  const acceptedAt = new Date().toISOString();
+  const cleanDisplayName = cleanName(officerMember?.displayName || officerUser.globalName || officerUser.username);
+
+  return safeSubmitDepartmentEvent({
+    actionType: 'APPLICATION_ACCEPTED_FOR_TRAINING',
+    interaction,
+    actor: interaction.user,
+    target: officerMember || officerUser,
+    targetDiscordId: officerUser.id,
+    targetDiscordTag: getUserTag(officerUser),
+    targetName: cleanDisplayName || officerMember?.displayName || officerUser.username,
+    reason: firstUseful(details.reason, details.notes, details.comments),
+    payload: {
+      flow: 'accepted_for_training',
+      decisionId: outcomeId,
+      decisionLabel: outcomeConfig.label || outcomeId,
+      officerDiscordId: officerUser.id,
+      officerTag: getUserTag(officerUser),
+      officerDisplayName: officerMember?.displayName || officerUser.globalName || officerUser.username,
+      cleanDisplayName,
+      staffDiscordId: interaction.user.id,
+      staffTag: getUserTag(interaction.user),
+      reason: firstUseful(details.reason, details.notes),
+      comments: firstUseful(details.comments, details.instructions),
+      roleResult,
+      dmSent: dmStatus === 'Yes',
+      acceptedAt,
+      trainingType: 'Application Accepted For Training',
+      status: 'Pending Training',
+      cadetTracker: {
+        discordId: officerUser.id,
+        name: cleanDisplayName || officerMember?.displayName || officerUser.username,
+        dateJoined: acceptedAt,
+        trained: false,
+        status: 'Pending Training'
+      }
+    }
+  });
 }
 
 function buildApplicationDecisionRow({ serverConfig, sessionId, staffId, officerId }) {
@@ -268,7 +324,7 @@ function buildConfirmRow(flow, outcomeId, staffId, officerId, sessionId) { retur
 function getOutcomeConfig(serverConfig, flow, outcomeId) { return flow === 'app' ? serverConfig.trainingManagement?.applicationReview?.decisions?.[outcomeId] || {} : serverConfig.trainingManagement?.cadetTraining?.outcomes?.[outcomeId] || {}; }
 function buildCadetGuideMessage(serverConfig, officerUser) { const cfg = serverConfig.trainingManagement?.cadetTraining || {}; return [`**${cfg.guideTitle || 'Cadet Training Directions/Information'}**`, `Officer: ${officerUser}`, '', cfg.guideMessage || 'No guide message is configured.'].join('\n'); }
 function buildConfirmationMessage({ state, serverConfig }) { const cfg = getOutcomeConfig(serverConfig, state.flow, state.outcomeId); const lines = [`Please confirm this ${FLOW_LABELS[state.flow]} action:`, '', `Officer: <@${state.officerUserId}>`, `Staff member: <@${state.staffUserId}>`, state.flow === 'cadet' ? 'Training type: Cadet Training' : null, `Decision/Outcome: ${cfg.label || state.outcomeId}`, '', ...Object.entries(state.details || {}).filter(([,v]) => v && v !== 'None provided.').map(([k,v]) => `${labelize(k)}: ${v}`), '', `Roles to add: ${formatRoleIds(cfg.addRoleIds)}`, `Roles to remove: ${formatRoleIds(cfg.removeRoleIds)}`, '', 'No changes have been made yet.']; return lines.filter(Boolean).join('\n'); }
-function buildSuccessMessage({ flow, officerUser, cfg, roleResult, dmStatus }) { const roleSummary = formatRoleChangeResult(roleResult); return [`${FLOW_LABELS[flow]} completed for ${officerUser}.`, `Outcome: ${cfg.label || 'Unknown'}`, `DM sent: ${dmStatus}`, '', roleSummary, '', roleResult.failed.length ? 'Warning: Some role changes failed. The decision was logged, but review the failures above.' : 'Staff log was attempted.'].join('\n'); }
+function buildSuccessMessage({ flow, officerUser, cfg, roleResult, dmStatus, googleResult }) { const roleSummary = formatRoleChangeResult(roleResult); return [`${FLOW_LABELS[flow]} completed for ${officerUser}.`, `Outcome: ${cfg.label || 'Unknown'}`, `DM sent: ${dmStatus}`, googleResult ? `Google CadetTracker event: ${formatGoogleResult(googleResult)}` : null, '', roleSummary, '', roleResult.failed.length ? 'Warning: Some role changes failed. The decision was logged, but review the failures above.' : 'Staff log was attempted.'].filter(Boolean).join('\n'); }
 async function sendTrainingDm({ officerUser, serverConfig, flow, outcomeId, outcomeConfig, details, roleResult }) { const globalDm = serverConfig.trainingManagement?.dmEnabled !== false; if (!globalDm || outcomeConfig.dmEnabled === false || !outcomeConfig.dmMessage) return 'Disabled'; const values = buildDmValues({ officerUser, serverConfig, details, roleResult }); try { await officerUser.send({ content: formatTemplate(outcomeConfig.dmMessage, values) }); return 'Yes'; } catch (error) { console.warn(`Could not DM officer for training ${flow}/${outcomeId}:`, error); return 'No'; } }
 function buildDmValues({ officerUser, serverConfig, details, roleResult }) { const departmentName = serverConfig.trainingManagement?.departmentName || serverConfig.officerManagement?.departmentName || serverConfig.departmentName || 'the department'; return { officerName: officerUser.globalName || officerUser.username || officerUser.tag || String(officerUser.id), departmentName, commandTeamName: serverConfig.trainingManagement?.commandTeamName || serverConfig.officerManagement?.commandTeamName || `${departmentName} Command Team`, trainingName: 'Cadet Training', trainerName: '', rating: details.rating || '', performanceComments: details.performanceComments || '', whatWentWell: details.whatWentWell || '', improvementNotes: details.improvementNotes || '', additionalNotes: details.additionalNotes || '', reason: details.reason || 'None provided.', comments: details.comments || details.performanceSummary || 'None provided.', callsignLine: 'Your callsign will be assigned later by command.', roleChangeSummary: formatRoleChangeResult(roleResult) }; }
 function formatTemplate(template, values) { return template.replace(/\{([a-zA-Z]+)\}/g, (match, key) => values[key] ?? match); }
@@ -278,3 +334,8 @@ function unique(values) { return [...new Set(values.filter((value) => value && t
 function formatRoleIds(roleIds = []) { return unique(roleIds).map((id) => `<@&${id}>`).join(', ') || 'None'; }
 function labelize(value) { return value.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase()); }
 function buildFtoMentions(serverConfig, cfg) { if (!cfg.pingFtoCommand) return ''; const ids = unique(serverConfig.trainingManagement?.ftoCommandRoleIds || []); return ids.map((id) => `<@&${id}>`).join(' '); }
+function getUserTag(user) { return user?.tag || [user?.username, user?.discriminator && user.discriminator !== '0' ? user.discriminator : null].filter(Boolean).join('#') || null; }
+function isAcceptedForTrainingDecision(flow, outcomeId, cfg = {}) { return flow === 'app' && (cfg.acceptedForTraining === true || cfg.googleActionType === 'APPLICATION_ACCEPTED_FOR_TRAINING' || (outcomeId === 'approved' && cfg.acceptedForTraining !== false)); }
+function firstUseful(...values) { return values.find((value) => value && value !== 'None provided.') || null; }
+function cleanName(value) { return String(value || '').replace(/\s+/g, ' ').trim(); }
+function formatGoogleResult(result) { if (!result) return 'Not submitted'; if (result.ok) return result.requestId ? `Submitted (${result.requestId})` : 'Submitted'; if (result.pending) return 'Pending; Google request timed out'; if (result.busy) return 'Pending; Google was busy'; return `Failed (${result.error?.message || 'see logs'})`; }

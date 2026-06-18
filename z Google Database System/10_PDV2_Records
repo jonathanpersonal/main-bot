@@ -67,3 +67,260 @@ function pdv2UpsertStaffAccess_(input) {
   }
   return pdv2Success_({ email: email, access: obj });
 }
+
+function pdv2UpsertCadetTracker_(data, requestId) {
+  data = data || {};
+  var cadetData = data.cadetTracker && typeof data.cadetTracker === 'object' ? data.cadetTracker : {};
+  data = Object.assign({}, cadetData, data);
+  if (!pdv2Bool_(pdv2GetConfigValue_('CADET_TRACKER_ENABLED', 'TRUE'), true)) {
+    return pdv2Success_({ skipped: true, reason: 'CADET_TRACKER_ENABLED is FALSE.' });
+  }
+
+  var discordId = pdv2String_(pdv2Pick_(data, ['targetDiscordId', 'officerDiscordId', 'discordId', 'Discord ID']));
+  if (!discordId) return pdv2Fail_('Missing Discord ID for CadetTracker upsert.');
+
+  var dateJoined = pdv2Pick_(data, ['dateJoined', 'acceptedAt'], pdv2Now_());
+  var periodDays = Number(pdv2GetConfigValue_('CADET_DEFAULT_PERIOD_DAYS', '14') || 14);
+  var endDate = pdv2Pick_(data, ['endDate'], '');
+  if (!endDate && dateJoined) {
+    var base = dateJoined instanceof Date ? new Date(dateJoined.getTime()) : new Date(dateJoined);
+    if (!isNaN(base.getTime())) {
+      base.setDate(base.getDate() + periodDays);
+      endDate = base;
+    }
+  }
+
+  var obj = {
+    'Discord ID': discordId,
+    'Name': pdv2Pick_(data, ['targetName', 'cleanDisplayName', 'officerDisplayName', 'name'], ''),
+    'Date Joined': dateJoined,
+    'End Date': endDate,
+    'Trained?': pdv2Pick_(data, ['trained', 'Trained?'], pdv2GetConfigValue_('CADET_TRAINED_DEFAULT', 'FALSE')),
+    'Days Remaining': '',
+    'Current End Date': endDate,
+    'Status': pdv2Pick_(data, ['cadetStatus', 'status'], pdv2GetConfigValue_('CADET_DEFAULT_STATUS', 'Pending Training')),
+    'Name (DO NOT TOUCH)': pdv2Pick_(data, ['targetName', 'cleanDisplayName', 'officerDisplayName', 'name'], '')
+  };
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.CADET_TRACKER, 'Discord ID', discordId);
+  if (row) {
+    if (pdv2Pick_(data, ['statusOverride'], '') !== '') obj['Status Override'] = pdv2Pick_(data, ['statusOverride'], '');
+    if (pdv2Pick_(data, ['modifiedBy'], '') !== '') obj['Modified By:'] = pdv2Pick_(data, ['modifiedBy'], '');
+    if (pdv2Pick_(data, ['manualEndDate'], '') !== '') obj['Manual End Date'] = pdv2Pick_(data, ['manualEndDate'], '');
+    pdv2UpdateRowObject_(PDV2.SHEETS.CADET_TRACKER, row, obj);
+  } else {
+    pdv2AppendObject_(PDV2.SHEETS.CADET_TRACKER, Object.assign({}, obj, {
+      'Status Override': pdv2Pick_(data, ['statusOverride'], ''),
+      'Modified By:': pdv2Pick_(data, ['submittedByDiscordId', 'staffDiscordId', 'modifiedBy'], ''),
+      'Manual End Date': pdv2Pick_(data, ['manualEndDate'], '')
+    }));
+  }
+  pdv2Audit_('DISCORD_BOT', 'CADET_TRACKER_UPSERTED', pdv2Pick_(data, ['submittedByDiscordId'], ''), 'CadetTracker', discordId, requestId || '', { rowNumber: row || 'new' });
+  return pdv2Success_({ discordId: discordId, rowNumber: row || pdv2FindRowByValue_(PDV2.SHEETS.CADET_TRACKER, 'Discord ID', discordId), cadet: obj });
+}
+
+function pdv2MarkCadetTrainingPassed_(data, requestId) {
+  data = data || {};
+  var discordId = pdv2String_(pdv2Pick_(data, ['targetDiscordId', 'discordId', 'Discord ID']));
+  if (!discordId) return pdv2Fail_('Missing Discord ID for CadetTracker pass update.');
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.CADET_TRACKER, 'Discord ID', discordId);
+  if (!row) {
+    pdv2UpsertCadetTracker_(Object.assign({}, data, { trained: 'TRUE', cadetStatus: 'Trained/Passed' }), requestId);
+    row = pdv2FindRowByValue_(PDV2.SHEETS.CADET_TRACKER, 'Discord ID', discordId);
+  }
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.CADET_TRACKER, row, {
+    'Trained?': 'TRUE',
+    'Status': pdv2Pick_(data, ['cadetStatus'], 'Trained/Passed'),
+    'Modified By:': pdv2Pick_(data, ['submittedByDiscordId', 'modifiedBy'], '')
+  });
+  pdv2Audit_('DISCORD_BOT', 'CADET_TRAINING_PASSED', pdv2Pick_(data, ['submittedByDiscordId'], ''), 'CadetTracker', discordId, requestId || '', {});
+  return pdv2Success_({ discordId: discordId, cadet: saved });
+}
+
+function pdv2AppendPatrolLog_(data, requestId) {
+  data = data || {};
+  var patrolLogId = pdv2GenerateId_('PATROL');
+  var minutes = Number(pdv2Pick_(data, ['durationMinutes'], 0)) || 0;
+  var hours = pdv2Pick_(data, ['durationHours'], minutes ? Math.round((minutes / 60) * 100) / 100 : '');
+  pdv2AppendObject_(PDV2.SHEETS.PATROL_LOGS, {
+    'PatrolLogId': patrolLogId,
+    'Discord ID': pdv2Pick_(data, ['targetDiscordId', 'discordId'], ''),
+    'Name': pdv2Pick_(data, ['targetName', 'name'], ''),
+    'Rank': pdv2Pick_(data, ['rank'], ''),
+    'Department': pdv2Pick_(data, ['department', 'departmentKey'], pdv2GetConfigValue_('DEFAULT_DEPARTMENT_KEY', 'main')),
+    'Patrol Type': pdv2Pick_(data, ['patrolType', 'type'], 'Duty'),
+    'Started At': pdv2Pick_(data, ['startedAt'], ''),
+    'Ended At': pdv2Pick_(data, ['endedAt'], ''),
+    'Duration Minutes': minutes || '',
+    'Duration Hours': hours,
+    'Cycle Key': pdv2Pick_(data, ['cycleKey'], pdv2GetConfigValue_('HOURS_CURRENT_CYCLE_KEY', '')),
+    'Logged By Discord ID': pdv2Pick_(data, ['submittedByDiscordId', 'loggedByDiscordId'], ''),
+    'Source': pdv2Pick_(data, ['source'], 'DISCORD_BOT'),
+    'Request ID': requestId || '',
+    'Notes': pdv2Pick_(data, ['notes'], ''),
+    'Created At': pdv2Now_(),
+    'Updated At': pdv2Now_()
+  });
+  pdv2Audit_('DISCORD_BOT', 'PATROL_LOG_CREATED', pdv2Pick_(data, ['submittedByDiscordId'], ''), 'PatrolLogs', patrolLogId, requestId || '', {});
+  return pdv2Success_({ patrolLogId: patrolLogId, hoursMode: pdv2GetConfigValue_('HOURS_MODE', 'FORMULA') });
+}
+
+function pdv2ActivityNoticeDiscordId_(data) {
+  return pdv2String_(pdv2Pick_(data || {}, ['targetDiscordId', 'officerDiscordId', 'discordId', 'Discord ID'], ''));
+}
+
+function pdv2ActivityNoticeType_(data) {
+  data = data || {};
+  var explicit = pdv2String_(pdv2Pick_(data, ['noticeType', 'Notice Type'], ''));
+  if (explicit) return explicit;
+  var actionType = pdv2Upper_(pdv2Pick_(data, ['actionType'], ''));
+  if (actionType.indexOf('STRIKE') >= 0) return 'STRIKE';
+  return 'ACTIVITY';
+}
+
+function pdv2FindActiveActivityNoticeRow_(discordId, noticeType, noticeLevel) {
+  var rows = pdv2ListRows_(PDV2.SHEETS.ACTIVITY_NOTICES);
+  var typeUpper = pdv2Upper_(noticeType);
+  var levelUpper = pdv2Upper_(noticeLevel);
+  for (var i = rows.length - 1; i >= 0; i--) {
+    var row = rows[i];
+    if (pdv2String_(row['Discord ID']) !== pdv2String_(discordId)) continue;
+    if (pdv2Upper_(row.Status) !== 'ACTIVE') continue;
+    if (typeUpper && pdv2Upper_(row['Notice Type']) !== typeUpper) continue;
+    if (levelUpper && pdv2Upper_(row['Notice Level']) !== levelUpper) continue;
+    return row.__rowNumber;
+  }
+  return 0;
+}
+
+function pdv2AppendActivityNoticeRecord_(data, requestId) {
+  data = data || {};
+  var noticeId = pdv2GenerateId_('NOTICE');
+  var discordId = pdv2ActivityNoticeDiscordId_(data);
+  var now = pdv2Now_();
+  var notice = {
+    'NoticeId': noticeId,
+    'Discord ID': discordId,
+    'Name': pdv2Pick_(data, ['targetName', 'officerDisplayName', 'name'], ''),
+    'Rank': pdv2Pick_(data, ['rank', 'Rank'], ''),
+    'Notice Type': pdv2ActivityNoticeType_(data),
+    'Notice Level': pdv2Pick_(data, ['noticeLevel', 'strikeLevel'], ''),
+    'Reason': pdv2Pick_(data, ['reason'], ''),
+    'Issued By Discord ID': pdv2Pick_(data, ['submittedByDiscordId', 'issuedByDiscordId'], ''),
+    'Issued By Name': pdv2Pick_(data, ['submittedByDiscordTag', 'issuedByTag', 'issuedByName'], ''),
+    'Issued At': pdv2Pick_(data, ['issuedAt'], now),
+    'Expires At': pdv2Pick_(data, ['expiresAt'], ''),
+    'Status': pdv2Pick_(data, ['status'], 'Active'),
+    'Resolved At': pdv2Pick_(data, ['resolvedAt'], ''),
+    'Resolved By Discord ID': pdv2Pick_(data, ['resolvedByDiscordId'], ''),
+    'Request ID': requestId || '',
+    'Source': pdv2Pick_(data, ['source'], 'DISCORD_BOT'),
+    'Notes': pdv2Pick_(data, ['notes'], ''),
+    'Created At': now,
+    'Updated At': now
+  };
+  var rowNumber = pdv2AppendObject_(PDV2.SHEETS.ACTIVITY_NOTICES, notice);
+  return pdv2Success_({ noticeId: noticeId, rowNumber: rowNumber, notice: notice });
+}
+
+function pdv2UpdateDatabaseActivityNoticeSummary_(data, requestId) {
+  data = data || {};
+  var discordId = pdv2ActivityNoticeDiscordId_(data);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for activity notice summary update.');
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
+  if (!row) {
+    return pdv2Success_({
+      discordId: discordId,
+      databaseUpdated: false,
+      warning: 'No Database officer row found for Discord ID ' + discordId + '.'
+    });
+  }
+
+  var clear = pdv2Bool_(pdv2Pick_(data, ['clearSummary'], false), false);
+  var updates = clear ? {
+    'Activity Notice Level': '',
+    'Activity Notice Reason': '',
+    'Activity Notice Issued At': '',
+    'Activity Notice Expires At': '',
+    'Activity Notice Issued By': '',
+    'Latest Change': pdv2Now_()
+  } : {
+    'Activity Notice Level': pdv2Pick_(data, ['noticeLevel', 'Notice Level'], ''),
+    'Activity Notice Reason': pdv2Pick_(data, ['reason', 'Reason'], ''),
+    'Activity Notice Issued At': pdv2Pick_(data, ['issuedAt', 'Issued At'], pdv2Now_()),
+    'Activity Notice Expires At': pdv2Pick_(data, ['expiresAt', 'Expires At'], ''),
+    'Activity Notice Issued By': pdv2Pick_(data, ['submittedByDiscordId', 'issuedByDiscordId', 'Issued By Discord ID'], ''),
+    'Latest Change': pdv2Now_()
+  };
+  var departmentStatus = pdv2Pick_(data, ['departmentStatus'], '');
+  if (!clear && departmentStatus) updates['Department Status'] = departmentStatus;
+
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, updates);
+  pdv2Audit_(pdv2Pick_(data, ['source'], 'DISCORD_BOT'), clear ? 'DATABASE_ACTIVITY_NOTICE_CLEARED' : 'DATABASE_ACTIVITY_NOTICE_UPDATED', pdv2Pick_(data, ['submittedByDiscordId', 'issuedByDiscordId', 'Issued By Discord ID', 'resolvedByDiscordId'], ''), 'Database', discordId, requestId || '', updates);
+  return pdv2Success_({ discordId: discordId, databaseUpdated: true, record: saved });
+}
+
+function pdv2IssueActivityNotice_(data, requestId) {
+  data = data || {};
+  var discordId = pdv2ActivityNoticeDiscordId_(data);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for activity notice issue.');
+
+  var noticeType = pdv2ActivityNoticeType_(data);
+  var noticeLevel = pdv2Pick_(data, ['noticeLevel', 'strikeLevel'], '');
+  var existingRow = pdv2FindActiveActivityNoticeRow_(discordId, noticeType, noticeLevel);
+  if (existingRow) {
+    var existing = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.ACTIVITY_NOTICES), existingRow);
+    var summary = pdv2UpdateDatabaseActivityNoticeSummary_(Object.assign({}, data, {
+      noticeLevel: existing['Notice Level'],
+      reason: existing.Reason,
+      issuedAt: existing['Issued At'],
+      expiresAt: existing['Expires At'],
+      issuedByDiscordId: existing['Issued By Discord ID']
+    }), requestId);
+    return pdv2Success_({ discordId: discordId, duplicateActiveNotice: true, noticeId: existing.NoticeId, notice: existing, summary: summary });
+  }
+
+  var appended = pdv2AppendActivityNoticeRecord_(Object.assign({}, data, { status: pdv2Pick_(data, ['status'], 'Active'), noticeType: noticeType }), requestId);
+  var summaryResult = pdv2UpdateDatabaseActivityNoticeSummary_(Object.assign({}, data, {
+    noticeLevel: appended.notice['Notice Level'],
+    reason: appended.notice.Reason,
+    issuedAt: appended.notice['Issued At'],
+    expiresAt: appended.notice['Expires At'],
+    issuedByDiscordId: appended.notice['Issued By Discord ID']
+  }), requestId);
+  pdv2Audit_(pdv2Pick_(data, ['source'], 'DISCORD_BOT'), 'ACTIVITY_NOTICE_ISSUED', pdv2Pick_(data, ['submittedByDiscordId', 'issuedByDiscordId'], ''), 'ActivityNotices', appended.noticeId, requestId || '', { discordId: discordId, noticeType: noticeType, noticeLevel: noticeLevel });
+  return pdv2Success_({ discordId: discordId, noticeId: appended.noticeId, notice: appended.notice, summary: summaryResult });
+}
+
+function pdv2ResolveActivityNotice_(data, requestId) {
+  data = data || {};
+  var discordId = pdv2ActivityNoticeDiscordId_(data);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for activity notice resolve.');
+
+  var noticeId = pdv2String_(pdv2Pick_(data, ['noticeId', 'NoticeId'], ''));
+  var row = noticeId ? pdv2FindRowByValue_(PDV2.SHEETS.ACTIVITY_NOTICES, 'NoticeId', noticeId) : 0;
+  if (!row) row = pdv2FindActiveActivityNoticeRow_(discordId, pdv2ActivityNoticeType_(data), pdv2Pick_(data, ['noticeLevel', 'strikeLevel'], ''));
+  if (!row) {
+    return pdv2Success_({ discordId: discordId, resolved: false, warning: 'No matching active activity notice found.' });
+  }
+
+  var now = pdv2Now_();
+  var resolvedBy = pdv2Pick_(data, ['submittedByDiscordId', 'resolvedByDiscordId'], '');
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.ACTIVITY_NOTICES, row, {
+    'Status': pdv2Pick_(data, ['status'], 'Resolved'),
+    'Resolved At': pdv2Pick_(data, ['resolvedAt'], now),
+    'Resolved By Discord ID': resolvedBy,
+    'Updated At': now
+  });
+  var remainingRow = pdv2FindActiveActivityNoticeRow_(discordId, '', '');
+  var summaryResult = remainingRow
+    ? pdv2UpdateDatabaseActivityNoticeSummary_(pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.ACTIVITY_NOTICES), remainingRow), requestId)
+    : pdv2UpdateDatabaseActivityNoticeSummary_(Object.assign({}, data, { clearSummary: true }), requestId);
+  pdv2Audit_(pdv2Pick_(data, ['source'], 'DISCORD_BOT'), 'ACTIVITY_NOTICE_RESOLVED', resolvedBy, 'ActivityNotices', saved.NoticeId || noticeId, requestId || '', { discordId: discordId });
+  return pdv2Success_({ discordId: discordId, noticeId: saved.NoticeId || noticeId, resolved: true, notice: saved, summary: summaryResult });
+}
+
+function pdv2AppendActivityNotice_(data, requestId) {
+  return pdv2IssueActivityNotice_(data, requestId);
+}

@@ -216,11 +216,36 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
     if (
       actionType === 'TRAINING_COMPLETE' ||
       actionType === 'APPLICATION_REVIEW' ||
-      actionType === 'CADET_TRAINING'
+      actionType === 'CADET_TRAINING' ||
+      actionType === 'APPLICATION_ACCEPTED_FOR_TRAINING' ||
+      actionType === 'CADET_ACCEPTED_FOR_TRAINING' ||
+      actionType === 'TRAINING_PASSED'
     ) {
-      var trainingResult = pdv2AppendTrainingRecord_(Object.assign({}, data, {
-        actionType: actionType
-      }), requestId);
+      var trainingData = Object.assign({}, payload, data, { actionType: actionType });
+      var trainingResult = pdv2AppendTrainingRecord_(trainingData, requestId);
+      var cadetResult = null;
+      var databaseResult = null;
+
+      if (actionType === 'APPLICATION_ACCEPTED_FOR_TRAINING' || actionType === 'CADET_ACCEPTED_FOR_TRAINING') {
+        cadetResult = pdv2UpsertCadetTracker_(trainingData, requestId);
+      }
+
+      if (actionType === 'TRAINING_PASSED' || (actionType === 'TRAINING_COMPLETE' && pdv2Upper_(pdv2Pick_(data, ['status'], '')) === 'PASSED')) {
+        cadetResult = pdv2MarkCadetTrainingPassed_(trainingData, requestId);
+        databaseResult = pdv2UpsertDatabaseRecord_(Object.assign({}, trainingData, { status: 'Active' }), {
+          source: source,
+          actor: actor,
+          requestId: requestId
+        });
+      }
+
+      var combinedTrainingResult = pdv2Success_({
+        training: trainingResult,
+        cadet: cadetResult,
+        database: databaseResult,
+        dbName: databaseResult && databaseResult.record ? databaseResult.record['Name'] : targetName,
+        callsign: databaseResult && databaseResult.record ? databaseResult.record['Current Callsign'] : ''
+      });
 
       pdv2CreateBotAction_({
         requestId: requestId,
@@ -229,11 +254,46 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
         payload: {
           actionType: actionType,
           requestId: requestId,
-          result: trainingResult
+          result: combinedTrainingResult
         }
       });
 
-      return trainingResult;
+      return combinedTrainingResult;
+    }
+
+    if (actionType === 'PATROL_LOG' || actionType === 'DUTY_PATROL_LOG') {
+      return pdv2AppendPatrolLog_(data, requestId);
+    }
+
+    if (
+      actionType === 'ACTIVITY_NOTICE_ISSUED' ||
+      actionType === 'ACTIVITY_STRIKE_ISSUED' ||
+      actionType === 'ACTIVITY_NOTICE_RESOLVED' ||
+      actionType === 'ACTIVITY_STRIKE_REMOVED'
+    ) {
+      var activityData = Object.assign({}, payload, data, { actionType: actionType });
+      var activityResult = (
+        actionType === 'ACTIVITY_NOTICE_RESOLVED' ||
+        actionType === 'ACTIVITY_STRIKE_REMOVED'
+      )
+        ? pdv2ResolveActivityNotice_(activityData, requestId)
+        : pdv2IssueActivityNotice_(activityData, requestId);
+
+      pdv2CreateBotAction_({
+        requestId: requestId,
+        actionType: 'ACTIVITY_NOTICE_RESULT',
+        targetDiscordId: targetDiscordId,
+        payload: {
+          actionType: actionType,
+          requestId: requestId,
+          discordId: pdv2ActivityNoticeDiscordId_(activityData),
+          noticeLevel: pdv2Pick_(activityData, ['noticeLevel', 'strikeLevel'], ''),
+          status: activityResult.ok ? 'PROCESSED' : 'FAILED',
+          result: activityResult
+        }
+      });
+
+      return activityResult;
     }
 
     pdv2CreateBotAction_({

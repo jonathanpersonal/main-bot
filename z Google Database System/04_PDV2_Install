@@ -15,6 +15,7 @@ function pdv2InstallOrRepairSystem() {
     pdv2SeedSystemConfig_();
     pdv2SeedStarterConfig_();
     pdv2SeedInitialStaffAccess_();
+    pdv2EnsureDatabaseRosterOptionColumns_();
 
     pdv2Log_('INFO', 'INSTALL', 'SYSTEM_REPAIRED', 'Install/repair completed.', { sheetsChecked: checked.length });
     pdv2Audit_('SHEET_MENU', 'SYSTEM_REPAIRED', Session.getActiveUser().getEmail(), 'System', 'PDV2', '', { sheetsChecked: checked });
@@ -42,7 +43,23 @@ function pdv2SeedSystemConfig_() {
     ['CALLSIGN_ASSIGN_ONLY_IF_EMPTY', 'TRUE', 'TRUE/FALSE toggle to avoid assigning a second callsign.'],
     ['CALLSIGN_RELEASE_ON_TERMINATION', 'FALSE', 'TRUE/FALSE toggle reserved for future termination release automation.'],
     ['CALLSIGN_RELEASE_ON_RESIGNATION', 'FALSE', 'TRUE/FALSE toggle reserved for future resignation release automation.'],
-    ['CALLSIGN_ASSIGNABLE_RANKS', '', 'Optional comma/newline separated rank keys or names eligible for callsign assignment. Blank allows all ranks.']
+    ['CALLSIGN_ASSIGNABLE_RANKS', '', 'Optional comma/newline separated rank keys or names eligible for callsign assignment. Blank allows all ranks.'],
+    ['HOURS_MODE', 'FORMULA', 'FORMULA logs patrol rows only; SCRIPT may summarize PatrolLogs into Database hour fields.'],
+    ['HOURS_CURRENT_CYCLE_KEY', '', 'Current patrol-hours cycle key for roster summaries.'],
+    ['HOURS_PREVIOUS_CYCLE_KEY', '', 'Previous patrol-hours cycle key for roster summaries.'],
+    ['HOURS_CYCLE_START_DATE', '', 'Current cycle start date when script-managed hours are enabled.'],
+    ['HOURS_CYCLE_END_DATE', '', 'Current cycle end date when script-managed hours are enabled.'],
+    ['DIVISION_DATABASE_ENABLED', 'FALSE', 'Reserved future toggle for Apps Script-managed linked division databases.'],
+    ['DIVISION_DATABASE_SPREADSHEET_ID', '', 'Reserved future linked division spreadsheet ID. Do not make the bot call this directly.'],
+    ['DIVISION_DATABASE_MODE', 'MAIN_ONLY', 'Reserved future division database routing mode.'],
+    ['TRAINING_PASS_DM_ENABLED', 'TRUE', 'TRUE/FALSE toggle for bot-sent DM after basic training pass.'],
+    ['TRAINING_PASS_DM_TEMPLATE', 'Hello {dbName}\n\nCongrats on passing your RWPD Basic Training. Your callsign is {callsign}. Please follow the steps below:\n\nUpdate in all Hypnotic or RWPD discords\n\n{teamSpeakMention}\n\nClick the button below to request steam group access. Please make sure you request to join the following steam group before clicking the button below {steamGroupLink}\n\nIf you have any questions, do not hesitate to ask a member of your CoC!\n\nKind Regards,\n\n{departmentName} Command staff', 'Configurable DM template for passed cadets. Placeholders: {dbName}, {callsign}, {steamGroupLink}, {teamSpeakMention}, {departmentName}.'],
+    ['STEAM_GROUP_LINK', 'XXPLACEHOLDERSTEAMGROUPLINKXX', 'Steam group link inserted into TRAINING_PASS_DM_TEMPLATE.'],
+    ['TEAMSPEAK_MENTION_TEXT', 'TBD TEAMSPEAK MENTION', 'TeamSpeak instruction text inserted into TRAINING_PASS_DM_TEMPLATE.'],
+    ['CADET_TRACKER_ENABLED', 'TRUE', 'TRUE/FALSE toggle for CadetTracker upserts on training acceptance/pass.'],
+    ['CADET_DEFAULT_PERIOD_DAYS', '14', 'Default cadet period length for script-managed CadetTracker rows.'],
+    ['CADET_DEFAULT_STATUS', 'Pending Training', 'Default CadetTracker status for accepted cadets.'],
+    ['CADET_TRAINED_DEFAULT', 'FALSE', 'Default Trained? value for new CadetTracker rows.']
   ];
 
   rows.forEach(function(row) {
@@ -98,7 +115,109 @@ function pdv2SeedStarterConfig_() {
     }
   });
 
+  pdv2SeedDivisionAndCertificationConfig_();
+  pdv2SeedDefaultRosterOptions_();
+
   return { departmentsAdded: departmentsAdded, ranksAdded: ranksAdded };
+}
+
+function pdv2SeedDivisionAndCertificationConfig_() {
+  var divisions = [
+    ['gtf', 'GTF', 'GTF', 10],
+    ['swat', 'SWAT', 'SWAT', 20],
+    ['ssd', 'SSD', 'SSD', 30],
+    ['ia', 'IA', 'IA', 40],
+    ['tbd_1', 'TBD', 'TBD', 50],
+    ['tbd_2', 'TBD', 'TBD', 60],
+    ['tbd_3', 'TBD', 'TBD', 70]
+  ];
+  divisions.forEach(function(item) {
+    if (!pdv2FindRowByValue_(PDV2.SHEETS.DIVISIONS_CONFIG, 'DivisionKey', item[0])) {
+      pdv2AppendObject_(PDV2.SHEETS.DIVISIONS_CONFIG, {
+        DivisionKey: item[0], DivisionName: item[1], RosterColumnLabel: item[2], DiscordRoleId: '', Active: 'TRUE', DisplayOrder: item[3], Notes: 'Starter division config. Edit per server.'
+      });
+    }
+  });
+
+  var certifications = [
+    ['rifle', 'Rifle Cert', 'Rifle Cert', 10],
+    ['tbd_1', 'TBD', 'TBD', 20],
+    ['tbd_2', 'TBD', 'TBD', 30],
+    ['tbd_3', 'TBD', 'TBD', 40],
+    ['tbd_4', 'TBD', 'TBD', 50]
+  ];
+  certifications.forEach(function(item) {
+    if (!pdv2FindRowByValue_(PDV2.SHEETS.CERTIFICATIONS_CONFIG, 'CertificationKey', item[0])) {
+      pdv2AppendObject_(PDV2.SHEETS.CERTIFICATIONS_CONFIG, {
+        CertificationKey: item[0], CertificationName: item[1], RosterColumnLabel: item[2], DiscordRoleId: '', Active: 'TRUE', DisplayOrder: item[3], Notes: 'Starter certification config. Edit per server.'
+      });
+    }
+  });
+}
+
+function pdv2SeedDefaultRosterOptions_() {
+  pdv2MigrateDeprecatedRosterOptionStarters_();
+
+  var starterOptions = [
+    ['DIV_FTO', 'DIVISION', 'FTA/FTO', 'Division Membership', 'FTA/FTO', 'Division - FTA/FTO', 5],
+    ['DIV_GTF', 'DIVISION', 'GTF', 'Division Membership', 'GTF', 'Division - GTF', 10],
+    ['DIV_SWAT', 'DIVISION', 'SWAT', 'Division Membership', 'SWAT', 'Division - SWAT', 20],
+    ['DIV_SSD', 'DIVISION', 'SSD', 'Division Membership', 'SSD', 'Division - SSD', 30],
+    ['DIV_IA', 'DIVISION', 'IA', 'Division Membership', 'IA', 'Division - IA', 40],
+    ['DIV_TBD_1', 'DIVISION', 'TBD', 'Division Membership', 'TBD', 'Division - TBD 1', 50],
+    ['DIV_TBD_2', 'DIVISION', 'TBD', 'Division Membership', 'TBD', 'Division - TBD 2', 60],
+    ['DIV_TBD_3', 'DIVISION', 'TBD', 'Division Membership', 'TBD', 'Division - TBD 3', 70],
+    ['CERT_LEGAL', 'CERTIFICATION', 'LEGAL', 'Certifications', 'LEGAL', 'Cert - LEGAL', 5],
+    ['CERT_RIFLE', 'CERTIFICATION', 'Rifle Cert', 'Certifications', 'Rifle Cert', 'Cert - Rifle Cert', 10],
+    ['CERT_TBD_1', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 1', 20],
+    ['CERT_TBD_2', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 2', 30],
+    ['CERT_TBD_3', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 3', 40],
+    ['CERT_TBD_4', 'CERTIFICATION', 'TBD', 'Certifications', 'TBD', 'Cert - TBD 4', 50]
+  ];
+
+  var added = 0;
+  starterOptions.forEach(function(item) {
+    if (!pdv2FindRowByValue_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, 'OptionKey', item[0])) {
+      pdv2AppendObject_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, {
+        'OptionKey': item[0],
+        'OptionType': item[1],
+        'DisplayName': item[2],
+        'RosterGroup': item[3],
+        'RosterColumnLabel': item[4],
+        'DatabaseColumnName': item[5],
+        'DiscordRoleId': '',
+        'Active': 'TRUE',
+        'DisplayOrder': item[6],
+        'Notes': 'Starter roster option. Edit per server.'
+      });
+      added++;
+    }
+  });
+
+  return { added: added };
+}
+
+function pdv2MigrateDeprecatedRosterOptionStarters_() {
+  var rows = pdv2ListRows_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG);
+  var changed = 0;
+  rows.forEach(function(row) {
+    var optionKey = pdv2Upper_(row.OptionKey);
+    var optionType = pdv2Upper_(row.OptionType);
+    var displayName = pdv2Upper_(row.DisplayName);
+    var shouldDeactivate =
+      optionKey === 'BUREAU_FTO' ||
+      optionKey === 'BUREAU_LEGAL' ||
+      (optionType === 'BUREAU_ASSIGNMENT' && (displayName === 'FTA/FTO' || displayName === 'LEGAL'));
+
+    if (shouldDeactivate && pdv2Bool_(row.Active, true)) {
+      pdv2UpdateRowObject_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG, row.__rowNumber, {
+        'Active': 'FALSE',
+        'Notes': pdv2String_(row.Notes) || 'Deprecated starter bureau option; use DIV_FTO or CERT_LEGAL.'
+      });
+      changed++;
+    }
+  });
+  return { changed: changed };
 }
 
 function pdv2SeedInitialStaffAccess_() {

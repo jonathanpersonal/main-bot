@@ -182,12 +182,88 @@ function pdv2RosterSyncSheetLog_(runId, event, message, meta) {
   pdv2Log_('INFO', runId, event, message, meta || {});
 }
 
-function pdv2RosterSourceLayout_(sheetName) {
-  var normalized = pdv2String_(sheetName).toLowerCase();
-  if (normalized === pdv2String_(PDV2.DEFAULTS.ROSTER_PROBATIONARY_SHEET_NAME).toLowerCase() || normalized.indexOf('probationary') >= 0) {
-    return { callsignCol: 4, nameCol: 6, rankCol: 8, discordIdCol: 21, maxCol: 21 };
+function pdv2NormalizeHeaderName_(value) {
+  return pdv2String_(value)
+    .replace(/[\u2018\u2019\u201B\u2032]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function pdv2RosterHeaderAliases_(sheetName) {
+  var probationary = pdv2String_(sheetName).toLowerCase().indexOf('probationary') >= 0;
+  var common = {
+    CALLSIGN: ['CALLSIGN', 'CALL SIGN'],
+    NAME: ['NAME', 'OFFICER NAME', 'DB NAME'],
+    RANK: ['RANK', 'CURRENT RANK'],
+    DATE_OF_ENTRY: ['DATE OF ENTRY', 'JOIN DATE', 'DATE JOINED'],
+    CURRENT_CYCLE_HOURS: ["Cycle's Hours", 'Cycles Hours', 'Current Cycle Hours', 'Current Month Hours'],
+    PUBLIC_NOTES: ['Public Notes'],
+    INTERNAL_NOTES: ['Internal Notes'],
+    DISCORD_ID: ['DISCORD ID', 'Discord ID', 'DISCORDID']
+  };
+  if (probationary) {
+    common.CURRENT_MONTH_HOURS = common.CURRENT_CYCLE_HOURS;
+    common.TRAINING_OFFICER = ['Training Officer', 'FTO', 'FTO Officer'];
+    common.DAYS_REMAINING = ['Days Remaining'];
+    common.NUMBER_OF_RAS = ["Number of RA's", 'Number of RAs', 'Ride Alongs', 'Ride-Alongs'];
+  } else {
+    common.DATE_OF_PROMOTION = ['DATE OF PROMOTION', 'PROMOTION DATE', 'LAST PROMOTION DATE'];
+    common.PREVIOUS_CYCLE_HOURS = ['Previous Cycles hours', 'Previous Cycle Hours', 'Previous Cycles Hours'];
+    common.ACTIVE_STATUS = ['ACTIVE STATUS'];
+    common.DEPARTMENT_STATUS = ['DEPARTMENT STATUS'];
   }
-  return { callsignCol: 4, nameCol: 6, rankCol: 8, discordIdCol: 39, maxCol: 39 };
+  return common;
+}
+
+function pdv2FindHeaderColumn_(sheet, headerNames, options) {
+  options = options || {};
+  var headerRows = options.headerRows || [5, 6];
+  var lastCol = sheet.getLastColumn();
+  if (!sheet || lastCol < 1) return null;
+  var aliases = (headerNames || []).map(pdv2NormalizeHeaderName_);
+  var scanned = [];
+
+  for (var r = 0; r < headerRows.length; r++) {
+    var rowNumber = Number(headerRows[r]);
+    if (!rowNumber || rowNumber > sheet.getLastRow()) continue;
+    var row = sheet.getRange(rowNumber, 1, 1, lastCol).getValues()[0];
+    for (var c = 0; c < row.length; c++) {
+      var raw = pdv2String_(row[c]);
+      if (!raw) continue;
+      var normalized = pdv2NormalizeHeaderName_(raw);
+      scanned.push({ row: rowNumber, column: c + 1, letter: pdv2ColumnLetter_(c + 1), value: raw, normalized: normalized });
+      if (aliases.indexOf(normalized) >= 0) {
+        return { row: rowNumber, column: c + 1, letter: pdv2ColumnLetter_(c + 1), value: raw, normalized: normalized };
+      }
+    }
+  }
+  return options.includeScanned ? { missing: true, aliases: aliases, scanned: scanned } : null;
+}
+
+function pdv2BuildRosterColumnMap_(sheet, options) {
+  options = options || {};
+  var headerRows = options.headerRows || [5, 6];
+  var aliasesByKey = options.aliases || pdv2RosterHeaderAliases_(sheet.getName());
+  var required = options.required || ['CALLSIGN', 'NAME', 'RANK', 'DISCORD_ID'];
+  var columns = {};
+  var missing = [];
+  Object.keys(aliasesByKey).forEach(function(key) {
+    var found = pdv2FindHeaderColumn_(sheet, aliasesByKey[key], { headerRows: headerRows });
+    if (found) columns[key] = found;
+    else if (required.indexOf(key) >= 0) missing.push({ key: key, aliases: aliasesByKey[key] });
+  });
+  return {
+    sheetName: sheet.getName(),
+    headerRows: headerRows,
+    lastRow: sheet.getLastRow(),
+    lastColumn: sheet.getLastColumn(),
+    columns: columns,
+    missingRequired: missing,
+    ok: missing.length === 0
+  };
 }
 
 function pdv2ColumnLetter_(col) {
@@ -201,166 +277,75 @@ function pdv2ColumnLetter_(col) {
 }
 
 function pdv2RosterDiagnosticCell_(row, col) {
-  return {
-    column: col,
-    letter: pdv2ColumnLetter_(col),
-    value: pdv2String_(row[col - 1])
-  };
+  return { column: col, letter: pdv2ColumnLetter_(col), value: pdv2String_(row[col - 1]) };
+}
+
+function pdv2RunRosterColumnDiagnostics_() {
+  return pdv2DiagnoseRosterColumns_();
 }
 
 function pdv2DiagnoseRosterColumns_() {
   var runId = pdv2GenerateId_('ROSTER-DIAG');
   var ss = pdv2RosterSpreadsheet_();
   var sheetNames = pdv2ConfiguredRosterSheetNames_();
-  var result = {
-    runId: runId,
-    spreadsheetName: ss.getName(),
-    sheetNames: sheetNames,
-    sheets: []
-  };
-
-  pdv2Log_('INFO', runId, 'ROSTER_DIAG_START', 'Starting roster column diagnostics.', {
-    spreadsheetName: result.spreadsheetName,
-    sheetNames: sheetNames
-  });
+  var result = { runId: runId, spreadsheetName: ss.getName(), sheetNames: sheetNames, sheets: [] };
+  pdv2Log_('INFO', runId, 'ROSTER_DIAG_START', 'Starting roster column diagnostics.', { spreadsheetName: result.spreadsheetName, sheetNames: sheetNames });
 
   sheetNames.forEach(function(sheetName) {
     var sh = ss.getSheetByName(sheetName);
-    var layout = pdv2RosterSourceLayout_(sheetName);
-    var sheetResult = {
-      sheetName: sheetName,
-      found: !!sh,
-      assumedLayout: {
-        callsign: pdv2ColumnLetter_(layout.callsignCol),
-        name: pdv2ColumnLetter_(layout.nameCol),
-        rank: pdv2ColumnLetter_(layout.rankCol),
-        discordId: pdv2ColumnLetter_(layout.discordIdCol)
-      },
-      rows: []
-    };
-
+    var sheetResult = { sheetName: sheetName, found: !!sh };
     if (!sh) {
       result.sheets.push(sheetResult);
       pdv2Log_('WARN', runId, 'ROSTER_DIAG_SHEET_MISSING', 'Roster sheet not found.', { sheetName: sheetName });
       return;
     }
-
-    var maxRows = Math.min(sh.getLastRow(), 20);
-    var maxCols = Math.min(Math.max(sh.getLastColumn(), 45), 45);
-    sheetResult.lastRow = sh.getLastRow();
-    sheetResult.lastColumn = sh.getLastColumn();
-    sheetResult.scannedRows = maxRows;
-    sheetResult.scannedColumns = maxCols;
-
-    if (maxRows > 0 && maxCols > 0) {
-      var values = sh.getRange(1, 1, maxRows, maxCols).getValues();
-      values.forEach(function(row, index) {
-        var nonEmpty = [];
-        row.forEach(function(value, colIndex) {
-          var text = pdv2String_(value);
-          if (text) nonEmpty.push({ column: colIndex + 1, letter: pdv2ColumnLetter_(colIndex + 1), value: text });
-        });
-        if (!nonEmpty.length) return;
-        sheetResult.rows.push({
-          rowNumber: index + 1,
-          assumedCells: {
-            callsign: pdv2RosterDiagnosticCell_(row, layout.callsignCol),
-            name: pdv2RosterDiagnosticCell_(row, layout.nameCol),
-            rank: pdv2RosterDiagnosticCell_(row, layout.rankCol),
-            discordId: pdv2RosterDiagnosticCell_(row, layout.discordIdCol)
-          },
-          nonEmpty: nonEmpty
-        });
-      });
-    }
-
+    sheetResult.columnMap = pdv2BuildRosterColumnMap_(sh, { headerRows: [5, 6] });
+    sheetResult.ok = sheetResult.columnMap.ok;
+    sheetResult.missingRequired = sheetResult.columnMap.missingRequired;
     result.sheets.push(sheetResult);
-    pdv2Log_('INFO', runId, 'ROSTER_DIAG_SHEET_COMPLETE', 'Roster sheet diagnostics complete.', sheetResult);
+    pdv2Log_(sheetResult.ok ? 'INFO' : 'ERROR', runId, 'ROSTER_DIAG_SHEET_COMPLETE', sheetResult.ok ? 'Roster sheet diagnostics complete.' : 'Roster required headers missing.', sheetResult);
   });
-
-  pdv2Log_('INFO', runId, 'ROSTER_DIAG_COMPLETE', 'Roster column diagnostics complete.', result);
+  result.ok = result.sheets.every(function(item) { return item.found && item.ok; });
+  pdv2Log_(result.ok ? 'INFO' : 'ERROR', runId, 'ROSTER_DIAG_COMPLETE', result.ok ? 'Roster column diagnostics complete.' : 'Roster column diagnostics found missing required headers.', result);
   try { SpreadsheetApp.flush(); } catch (err) {}
   return result;
 }
 
 function pdv2IsRosterHeaderOrLabelRow_(callsign, name, rank, discordId) {
-  var values = [callsign, name, rank, discordId].map(function(value) {
-    return pdv2String_(value).toLowerCase();
-  });
-  return values.indexOf('insignia') >= 0 ||
-    values.indexOf('callsign') >= 0 ||
-    values.indexOf('call sign') >= 0 ||
-    values.indexOf('name') >= 0 ||
-    values.indexOf('rank') >= 0 ||
-    values.indexOf('discord id') >= 0 ||
-    values.indexOf('discordid') >= 0;
+  var values = [callsign, name, rank, discordId].map(pdv2NormalizeHeaderName_);
+  return values.indexOf('INSIGNIA') >= 0 || values.indexOf('CALLSIGN') >= 0 || values.indexOf('CALL SIGN') >= 0 || values.indexOf('NAME') >= 0 || values.indexOf('RANK') >= 0 || values.indexOf('DISCORD ID') >= 0 || values.indexOf('DISCORDID') >= 0;
 }
 
 function pdv2ListRowsFromExistingSheet_(sh, runId) {
   if (!sh || sh.getLastRow() < 2 || sh.getLastColumn() < 1) return [];
-
-  var layout = pdv2RosterSourceLayout_(sh.getName());
+  var mapResult = pdv2BuildRosterColumnMap_(sh, { headerRows: [5, 6] });
+  if (!mapResult.ok) {
+    var missing = mapResult.missingRequired.map(function(item) { return item.key + ' (aliases: ' + item.aliases.join(', ') + ')'; }).join('; ');
+    throw new Error('Roster sheet "' + sh.getName() + '" is missing required headers: ' + missing);
+  }
+  var columns = mapResult.columns;
   var lastRow = sh.getLastRow();
-  var lastCol = Math.min(Math.max(sh.getLastColumn(), layout.maxCol), layout.maxCol);
-
-  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_SHEET_READ_START', 'Reading roster source sheet.', {
-    sheetName: sh.getName(),
-    lastRow: lastRow,
-    sheetLastColumn: sh.getLastColumn(),
-    readColumns: lastCol,
-    callsignCol: layout.callsignCol,
-    nameCol: layout.nameCol,
-    rankCol: layout.rankCol,
-    discordIdCol: layout.discordIdCol
-  });
-
+  var lastCol = sh.getLastColumn();
+  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_SHEET_READ_START', 'Reading roster source sheet with detected headers.', { sheetName: sh.getName(), lastRow: lastRow, sheetLastColumn: lastCol, columnMap: mapResult });
   var values = sh.getRange(1, 1, lastRow, lastCol).getValues();
   var rows = [];
-
   values.forEach(function(row, index) {
-    var callsign = row[layout.callsignCol - 1];
-    var name = row[layout.nameCol - 1];
-    var rank = row[layout.rankCol - 1];
-    var discordId = row[layout.discordIdCol - 1];
+    if (mapResult.headerRows.indexOf(index + 1) >= 0) return;
+    var callsign = row[columns.CALLSIGN.column - 1];
+    var name = row[columns.NAME.column - 1];
+    var rank = row[columns.RANK.column - 1];
+    var discordId = row[columns.DISCORD_ID.column - 1];
     if ([callsign, name, rank, discordId].join('').trim() === '') return;
     if (pdv2IsRosterHeaderOrLabelRow_(callsign, name, rank, discordId)) return;
-    rows.push({
-      __rowNumber: index + 1,
-      __sheetName: sh.getName(),
-      'Current Callsign': callsign,
-      'Name': name,
-      'Rank': rank,
-      'Discord ID': discordId
-    });
+    rows.push({ __rowNumber: index + 1, __sheetName: sh.getName(), 'Current Callsign': callsign, 'Name': name, 'Rank': rank, 'Discord ID': discordId });
   });
-
-  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_SHEET_READ_COMPLETE', 'Roster source sheet read complete.', {
-    sheetName: sh.getName(),
-    sourceRows: values.length,
-    usableRows: rows.length
-  });
-
+  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_SHEET_READ_COMPLETE', 'Roster source sheet read complete.', { sheetName: sh.getName(), sourceRows: values.length, usableRows: rows.length, columnMap: mapResult });
   return rows;
 }
 
 function pdv2FindRosterHeaderRow_(sh) {
-  var rowsToScan = Math.min(sh.getLastRow(), 25);
-  if (rowsToScan < 1) return 0;
-
-  var values = sh.getRange(1, 1, rowsToScan, sh.getLastColumn()).getValues();
-  var best = { row: 0, score: 0 };
-  values.forEach(function(row, index) {
-    var headers = row.map(function(value) { return pdv2String_(value).toLowerCase(); });
-    var score = 0;
-    if (headers.indexOf('callsign') >= 0 || headers.indexOf('call sign') >= 0) score += 3;
-    if (headers.indexOf('name') >= 0) score += 3;
-    if (headers.indexOf('rank') >= 0) score += 3;
-    if (headers.indexOf('discord id') >= 0 || headers.indexOf('discordid') >= 0) score += 2;
-    if (headers.indexOf('insignia') >= 0) score += 1;
-    if (score > best.score) best = { row: index + 1, score: score };
-  });
-
-  return best.score >= 6 ? best.row : 0;
+  var map = pdv2BuildRosterColumnMap_(sh, { headerRows: [5, 6] });
+  return map.ok ? 5 : 0;
 }
 
 function pdv2CanonicalRosterRecord_(row, defaultDepartment) {
@@ -377,42 +362,25 @@ function pdv2CanonicalRosterRecord_(row, defaultDepartment) {
     'Current Callsign': pdv2Pick_(row, ['Current Callsign', 'CURRENT CALLSIGN', 'Callsign', 'CALLSIGN', 'Call Sign', 'Unit Number', 'Unit', 'Badge Number', 'Badge'], ''),
     'Callsign Updated': pdv2Pick_(row, ['Callsign Updated', 'CALLSIGN UPDATED', 'Last Updated', 'Updated At'], '')
   };
-  Object.keys(row).forEach(function(key) {
-    if (!normalized.hasOwnProperty(key)) normalized[key] = row[key];
-  });
+  Object.keys(row).forEach(function(key) { if (!normalized.hasOwnProperty(key)) normalized[key] = row[key]; });
   return normalized;
 }
 
 function pdv2ListRosterRows_(runId) {
-  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_OPEN_ROSTER_START', 'Opening external roster spreadsheet.', {
-    rosterSpreadsheetConfigured: !!pdv2GetConfigValue_('ROSTER_SPREADSHEET_ID', '')
-  });
+  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_OPEN_ROSTER_START', 'Opening external roster spreadsheet.', { rosterSpreadsheetConfigured: !!pdv2GetConfigValue_('ROSTER_SPREADSHEET_ID', '') });
   var ss = pdv2RosterSpreadsheet_();
-  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_OPEN_ROSTER_COMPLETE', 'External roster spreadsheet opened.', {
-    spreadsheetName: ss.getName()
-  });
-
+  pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_OPEN_ROSTER_COMPLETE', 'External roster spreadsheet opened.', { spreadsheetName: ss.getName() });
   var sheetNames = pdv2ConfiguredRosterSheetNames_();
   var rows = [];
   var missing = [];
   var defaultDepartment = pdv2GetConfigValue_('DEFAULT_DEPARTMENT_KEY', 'main') || 'main';
-
   sheetNames.forEach(function(sheetName) {
     pdv2RosterSyncSheetLog_(runId, 'ROSTER_SYNC_SHEET_LOOKUP', 'Looking up roster source sheet.', { sheetName: sheetName });
     var sh = ss.getSheetByName(sheetName);
-    if (!sh) {
-      missing.push(sheetName);
-      return;
-    }
-    rows = rows.concat(pdv2ListRowsFromExistingSheet_(sh, runId).map(function(row) {
-      return pdv2CanonicalRosterRecord_(row, defaultDepartment);
-    }));
+    if (!sh) { missing.push(sheetName); return; }
+    rows = rows.concat(pdv2ListRowsFromExistingSheet_(sh, runId).map(function(row) { return pdv2CanonicalRosterRecord_(row, defaultDepartment); }));
   });
-
-  if (missing.length) {
-    throw new Error('Roster sheet tab(s) not found in external roster spreadsheet: ' + missing.join(', '));
-  }
-
+  if (missing.length) throw new Error('Roster sheet tab(s) not found in external roster spreadsheet: ' + missing.join(', '));
   return rows;
 }
 

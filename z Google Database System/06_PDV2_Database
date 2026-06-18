@@ -25,13 +25,67 @@ function pdv2MapIncomingOfficerRecord_(data) {
     'Training Officer': pdv2Pick_(data, ['trainingOfficer', 'Training Officer'], ''),
     'Probation Start': pdv2Pick_(data, ['probationStart', 'Probation Start'], ''),
     'Probation End': pdv2Pick_(data, ['probationEnd', 'Probation End'], ''),
-    'Notes': pdv2Pick_(data, ['notes', 'Notes'], '')
+    'Notes': pdv2Pick_(data, ['notes', 'Notes'], ''),
+    'Date of Promotion': pdv2Pick_(data, ['dateOfPromotion', 'promotionDate', 'Date of Promotion'], ''),
+    'Current Cycle Hours': pdv2Pick_(data, ['currentCycleHours', 'Current Cycle Hours'], ''),
+    'Previous Cycle Hours': pdv2Pick_(data, ['previousCycleHours', 'Previous Cycle Hours'], ''),
+    'Active Status': pdv2Pick_(data, ['activeStatus', 'Active Status'], ''),
+    'Department Status': pdv2Pick_(data, ['departmentStatus', 'Department Status'], ''),
+    'Activity Notice Level': pdv2Pick_(data, ['activityNoticeLevel', 'Activity Notice Level'], ''),
+    'Activity Notice Reason': pdv2Pick_(data, ['activityNoticeReason', 'Activity Notice Reason'], ''),
+    'Activity Notice Issued At': pdv2Pick_(data, ['activityNoticeIssuedAt', 'Activity Notice Issued At'], ''),
+    'Activity Notice Expires At': pdv2Pick_(data, ['activityNoticeExpiresAt', 'Activity Notice Expires At'], ''),
+    'Activity Notice Issued By': pdv2Pick_(data, ['activityNoticeIssuedBy', 'Activity Notice Issued By'], ''),
+    'Public Notes': pdv2Pick_(data, ['publicNotes', 'Public Notes'], ''),
+    'Internal Notes': pdv2Pick_(data, ['internalNotes', 'Internal Notes'], '')
   };
+}
+
+function pdv2GetActiveRosterOptions_() {
+  var rows = pdv2ListRows_(PDV2.SHEETS.ROSTER_OPTIONS_CONFIG).filter(function(row) {
+    return pdv2Bool_(row.Active, false) && pdv2String_(row.DatabaseColumnName);
+  });
+  rows.sort(function(a, b) {
+    var orderA = Number(a.DisplayOrder || 0);
+    var orderB = Number(b.DisplayOrder || 0);
+    if (orderA !== orderB) return orderA - orderB;
+    return pdv2String_(a.OptionKey).localeCompare(pdv2String_(b.OptionKey));
+  });
+  return rows;
+}
+
+function pdv2EnsureDatabaseRosterOptionColumns_() {
+  var columns = pdv2GetActiveRosterOptions_().map(function(option) {
+    return pdv2String_(option.DatabaseColumnName);
+  }).filter(function(column, index, all) {
+    return column && all.indexOf(column) === index;
+  });
+
+  if (columns.length) {
+    pdv2EnsureHeaders_(pdv2EnsureSheet_(PDV2.SHEETS.DATABASE), columns);
+  }
+
+  return pdv2Success_({ columnsChecked: columns.length, columns: columns });
+}
+
+function pdv2MapRosterOptionValues_(data) {
+  data = data || {};
+  var values = {};
+  pdv2GetActiveRosterOptions_().forEach(function(option) {
+    var key = pdv2String_(option.OptionKey);
+    var column = pdv2String_(option.DatabaseColumnName);
+    if (!column) return;
+    var raw = pdv2Pick_(data, [column, key], '');
+    if (raw !== '') values[column] = pdv2Bool_(raw, false) ? 'TRUE' : 'FALSE';
+  });
+  return values;
 }
 
 function pdv2UpsertDatabaseRecord_(data, options) {
   options = options || {};
-  var record = pdv2MapIncomingOfficerRecord_(data || {});
+  data = data || {};
+  var record = pdv2MapIncomingOfficerRecord_(data);
+  var rosterOptionValues = pdv2MapRosterOptionValues_(data);
   var discordId = pdv2String_(record['Discord ID']);
   if (!discordId) return pdv2Fail_('Missing Discord ID for database upsert.');
 
@@ -43,6 +97,9 @@ function pdv2UpsertDatabaseRecord_(data, options) {
     if (header === 'Latest Change') value = pdv2Now_();
     if (value !== '' || options.writeBlanks === true || header === 'Latest Change') update[header] = value;
   });
+  Object.keys(rosterOptionValues).forEach(function(header) {
+    update[header] = rosterOptionValues[header];
+  });
 
   var mode;
   if (row) {
@@ -50,6 +107,10 @@ function pdv2UpsertDatabaseRecord_(data, options) {
     mode = 'update';
   } else {
     if (!update['Status']) update['Status'] = 'Active';
+    pdv2GetActiveRosterOptions_().forEach(function(option) {
+      var column = pdv2String_(option.DatabaseColumnName);
+      if (column && update[column] === undefined) update[column] = 'FALSE';
+    });
     pdv2AppendObject_(PDV2.SHEETS.DATABASE, update);
     row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
     mode = 'insert';
@@ -62,6 +123,63 @@ function pdv2UpsertDatabaseRecord_(data, options) {
   });
 
   return pdv2Success_({ mode: mode, rowNumber: row, discordId: discordId, record: saved });
+}
+
+function pdv2ResolveRosterOptionColumn_(optionKeyOrDatabaseColumnName) {
+  var raw = pdv2String_(optionKeyOrDatabaseColumnName);
+  if (!raw) return '';
+  var rawUpper = pdv2Upper_(raw);
+  var options = pdv2GetActiveRosterOptions_();
+  for (var i = 0; i < options.length; i++) {
+    if (pdv2Upper_(options[i].OptionKey) === rawUpper || pdv2String_(options[i].DatabaseColumnName) === raw) {
+      return pdv2String_(options[i].DatabaseColumnName);
+    }
+  }
+  return raw;
+}
+
+function pdv2SetOfficerRosterOptionValue_(discordId, optionKeyOrDatabaseColumnName, value, metadata) {
+  metadata = metadata || {};
+  discordId = pdv2String_(discordId);
+  var column = pdv2ResolveRosterOptionColumn_(optionKeyOrDatabaseColumnName);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for roster option update.');
+  if (!column) return pdv2Fail_('Missing roster option key or Database column name.');
+
+  var activeColumns = pdv2GetActiveRosterOptions_().map(function(option) { return pdv2String_(option.DatabaseColumnName); });
+  if (activeColumns.indexOf(column) < 0) return pdv2Fail_('Roster option is not active or is not configured: ' + column + '.');
+
+  pdv2EnsureDatabaseRosterOptionColumns_();
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
+  if (!row) return pdv2Fail_('No Database record found for Discord ID ' + discordId + '.', { discordId: discordId });
+
+  var updates = {};
+  updates[column] = pdv2Bool_(value, false) ? 'TRUE' : 'FALSE';
+  updates['Latest Change'] = pdv2Now_();
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, updates);
+  pdv2Audit_(metadata.source || 'API', 'DATABASE_ROSTER_OPTION_UPDATED', metadata.actor || '', 'Database', discordId, metadata.requestId || '', {
+    column: column,
+    value: updates[column]
+  });
+  return pdv2Success_({ discordId: discordId, column: column, value: updates[column], record: saved });
+}
+
+function pdv2GetOfficerRosterOptions_(discordId) {
+  discordId = pdv2String_(discordId);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for roster option lookup.');
+  var recordResult = pdv2GetDatabaseRecordByDiscordId_(discordId);
+  if (!recordResult.ok) return recordResult;
+  var values = {};
+  pdv2GetActiveRosterOptions_().forEach(function(option) {
+    var column = pdv2String_(option.DatabaseColumnName);
+    values[pdv2String_(option.OptionKey)] = {
+      optionKey: pdv2String_(option.OptionKey),
+      optionType: pdv2String_(option.OptionType),
+      displayName: pdv2String_(option.DisplayName),
+      databaseColumnName: column,
+      value: pdv2Bool_(recordResult.record[column], false)
+    };
+  });
+  return pdv2Success_({ discordId: discordId, options: values });
 }
 
 function pdv2GetDatabaseRecordByDiscordId_(discordId) {
@@ -88,7 +206,8 @@ function pdv2SetDatabaseRank_(data, options) {
     targetDiscordId: discordId,
     targetName: name || (existing.ok ? existing.record['Name'] : ''),
     rank: newRank,
-    status: 'Active'
+    status: 'Active',
+    dateOfPromotion: pdv2Now_()
   }, {
     source: options.source || 'API',
     actor: options.actor || '',
