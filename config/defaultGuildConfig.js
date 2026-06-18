@@ -38,8 +38,7 @@ const defaultGuildConfig = {
     lookupRoleIds: [],
     syncRoleIds: [],
     manualOfficerUpdateRoleIds: [],
-    importUsersRoleIds: [],
-    devOnlyRoleIds: []
+    importUsersRoleIds: []
   },
   ranks: [],
   channels: {
@@ -59,11 +58,6 @@ const defaultGuildConfig = {
     enabled: false,
     webhookUrl: '',
     pollingUrl: ''
-  },
-  devOnly: {
-    enabled: false,
-    roleIds: [],
-    message: 'This bot is currently in developer-only mode.'
   },
   lookup: {
     enabled: true,
@@ -98,6 +92,8 @@ const defaultGuildConfig = {
   },
   training: {
     enabled: true,
+    sourceOfTruth: 'google',
+    localJsonFallbackEnabled: true,
     publicRosterUrl: 'PUBLIC_ROSTER_URL_PLACEHOLDER',
     steamGroupUrl: 'STEAM_GROUP_URL_PLACEHOLDER',
     cadetDeadlineDays: 14,
@@ -127,6 +123,7 @@ const defaultGuildConfig = {
   },
   probation: {
     enabled: true,
+    sourceOfTruth: 'google',
     cycleDays: 4,
     maxDays: 8,
     maxCycles: 2,
@@ -141,6 +138,12 @@ const defaultGuildConfig = {
     graduationRankKey: '',
     firstOfficerRankRoleId: '',
     firstOfficerPermissionRoleId: '',
+    check: {
+      enabled: true,
+      runOnStartup: true,
+      dailyTime: '15 9 * * *',
+      timezone: 'UTC'
+    },
     messages: {
       started: 'Your probationary period has started.',
       passed: 'Congratulations {dbName}, you passed probation.',

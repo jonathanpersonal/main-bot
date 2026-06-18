@@ -101,6 +101,9 @@ function pdv2RouteRequest_(data, options) {
   }
   if (normalizedRoute === 'getdatabaserecord') return pdv2GetDatabaseRecordByDiscordId_(pdv2Pick_(data, ['discordId', 'targetDiscordId'], ''));
   if (normalizedRoute === 'searchdatabase') return pdv2SearchDatabase_(pdv2Pick_(data, ['query', 'q'], ''), pdv2Pick_(data, ['limit', 'max'], 25));
+  if (normalizedRoute === 'listtrainingcadets') return pdv2ListTrainingCadets_(data);
+  if (normalizedRoute === 'listprobationaryofficers') return pdv2ListProbationaryOfficers_(data);
+  if (normalizedRoute === 'getprobationaryofficer') return pdv2GetProbationaryOfficer_(pdv2Pick_(data, ['discordId', 'targetDiscordId'], ''));
 
   if (normalizedRoute === 'listbotrequests') return pdv2ListSheetForUi_(PDV2.SHEETS.BOT_REQUESTS, pdv2Pick_(data, ['limit'], 100));
   if (normalizedRoute === 'listbotactions') return pdv2ListSheetForUi_(PDV2.SHEETS.BOT_ACTIONS, pdv2Pick_(data, ['limit'], 100));
@@ -123,6 +126,9 @@ function pdv2RouteRequest_(data, options) {
       'upsertDatabaseRecord',
       'getDatabaseRecord',
       'searchDatabase',
+      'listTrainingCadets',
+      'listProbationaryOfficers',
+      'getProbationaryOfficer',
       'getUiBootstrapData',
       'getUiDashboardData',
       'getOfficerProfile'

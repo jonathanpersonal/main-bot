@@ -287,6 +287,8 @@ Regards,
 
   training: {
     enabled: true,
+    sourceOfTruth: 'google',
+    localJsonFallbackEnabled: true,
     publicRosterUrl: 'PUBLIC_ROSTER_URL_PLACEHOLDER',
     steamGroupUrl: 'STEAM_GROUP_URL_PLACEHOLDER',
     cadetDeadlineDays: 14,
@@ -332,6 +334,7 @@ Kind Regards,
 
   probation: {
     enabled: true,
+    sourceOfTruth: 'google',
     cycleDays: 4,
     maxDays: 8,
     maxCycles: 2,
@@ -346,6 +349,12 @@ Kind Regards,
     graduationRankKey: 'Officer',
     firstOfficerRankRoleId: '',
     firstOfficerPermissionRoleId: '',
+    check: {
+      enabled: true,
+      runOnStartup: true,
+      dailyTime: '15 9 * * *',
+      timezone: 'America/New_York'
+    },
     messages: {
       started: 'Your probationary period has started.',
       passed: 'Congratulations {dbName}, you passed probation.',

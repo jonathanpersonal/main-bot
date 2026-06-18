@@ -30,19 +30,6 @@ function roleGroups(config = {}) {
   };
 }
 
-function isDevOnlyEnabled(config = {}) {
-  return Boolean(config?.devOnly?.enabled);
-}
-
-function getDevOnlyRoleIds(config = {}) {
-  return cleanRoleIds(config?.devOnly?.roleIds || config?.permissions?.devOnlyRoleIds || []);
-}
-
-function hasDevOnlyAccess(member, config = {}) {
-  if (!isDevOnlyEnabled(config)) return true;
-  return hasAnyRole(member, getDevOnlyRoleIds(config));
-}
-
 function memberHasPermissionGroup(member, config, groups = [], fallbackPermission = null) {
   const all = roleGroups(config);
   const roleIds = groups.flatMap((g) => all[g] || []);
@@ -66,7 +53,6 @@ const permissionMap = {
 };
 
 function canUseCommand(member, config, permissionKey) {
-  if (!hasDevOnlyAccess(member, config)) return false;
   const rule = permissionMap[permissionKey] || { groups: [permissionKey], fallback: null };
   return memberHasPermissionGroup(member, config, rule.groups, rule.fallback);
 }
@@ -76,19 +62,6 @@ async function logDenied(interaction, permissionKey) {
   const channelId = config?.channels?.botAdminLogChannelId || config?.channels?.staffLogChannelId || config?.logging?.staffLogChannelId;
   const channel = channelId ? await interaction.guild?.channels.fetch(channelId).catch(() => null) : null;
   if (channel?.isTextBased()) channel.send({ content: `Permission denied: ${interaction.user.tag} (${interaction.user.id}) tried /${interaction.commandName || 'interaction'} requiring ${permissionKey}.` }).catch(() => {});
-}
-
-async function requireDevOnlyAccess(interaction, options = {}) {
-  const config = options.config || getServerConfig(interaction.guildId);
-  if (hasDevOnlyAccess(interaction.member, config)) return true;
-  await logDenied(interaction, 'devOnly');
-  if (interaction.isAutocomplete?.()) {
-    await interaction.respond([]).catch(() => {});
-    return false;
-  }
-  const payload = { content: config?.devOnly?.message || 'This bot is currently in developer-only mode.', ephemeral: true };
-  if (interaction.replied || interaction.deferred) await interaction.followUp(payload); else await interaction.reply(payload);
-  return false;
 }
 
 async function requirePermission(interaction, permissionKey, options = {}) {
@@ -110,4 +83,4 @@ const isDepartmentCommand = (m,c) => canUseCommand(m,c,'departmentCommand');
 const canManageTraining = (m,c,l='officer') => canUseCommand(m,c,l==='command'?'ftoCommand':'trainingOfficer');
 const canManageProbation = (m,c,l='officer') => canUseCommand(m,c,l==='command'?'ftoCommand':'trainingOfficer');
 
-module.exports = { cleanRoleIds, hasAnyRole, hasAllRoles, roleGroups, isDevOnlyEnabled, getDevOnlyRoleIds, hasDevOnlyAccess, requireDevOnlyAccess, memberHasAnyRole: hasAnyRole, memberHasPermissionGroup, isBotAdmin, isCommandStaff, isHighCommand, isSupervisor, isTrainingOfficer, isFtoCommand, isDepartmentCommand, canUseCommand, requirePermission, canManageTraining, canManageProbation };
+module.exports = { cleanRoleIds, hasAnyRole, hasAllRoles, roleGroups, memberHasAnyRole: hasAnyRole, memberHasPermissionGroup, isBotAdmin, isCommandStaff, isHighCommand, isSupervisor, isTrainingOfficer, isFtoCommand, isDepartmentCommand, canUseCommand, requirePermission, canManageTraining, canManageProbation };
