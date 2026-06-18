@@ -60,7 +60,26 @@ Execute as: Me
 Who has access: Anyone
 ```
 
-12. Copy the Web App URL for the bot.
+12. Before copying the URL, confirm Apps Script includes the web app entrypoint:
+
+```javascript
+function doGet(e)
+function doPost(e)
+```
+
+Both should be in `13_PDV2_WebApp`. If the bot or Cloudflare Worker logs either
+of these errors:
+
+```text
+Script function not found: doGet
+Script function not found: doPost
+```
+
+the Web App URL is pointing at a deployment/version that does not include
+`13_PDV2_WebApp`. Add that file to the Apps Script project, then create a new
+Web App deployment or edit the existing deployment to use a new version.
+
+13. Copy the Web App URL for the bot or Cloudflare Worker.
 
 ## Sheets created
 

@@ -27,6 +27,14 @@ function looksLikeJson(contentType, text) {
     /^[\s\n\r]*[\[{]/.test(text || '');
 }
 
+function parseJsonBody(rawBody) {
+  try {
+    return JSON.parse(rawBody || '{}');
+  } catch {
+    return {};
+  }
+}
+
 function withSecretIfConfigured(rawBody, env) {
   if (!env.GOOGLE_SCRIPT_SECRET) return rawBody;
 
@@ -40,6 +48,57 @@ function withSecretIfConfigured(rawBody, env) {
   } catch {
     return rawBody;
   }
+}
+
+function getRouteFromBody(rawBody) {
+  const parsed = parseJsonBody(rawBody);
+  return String(parsed.route || parsed.action || 'ping');
+}
+
+function canFallbackToGet(route) {
+  return ['ping', 'getpendingbotactions', 'getrequeststatus'].includes(String(route || '').toLowerCase());
+}
+
+function isMissingDoPost(text) {
+  return /Script function not found:\s*doPost/i.test(stripHtml(text));
+}
+
+function buildGetFallbackUrl(appsScriptUrl, rawBody) {
+  const parsed = parseJsonBody(rawBody);
+  const url = new URL(appsScriptUrl);
+
+  Object.entries(parsed).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    if (typeof value === 'object') return;
+    url.searchParams.set(key, String(value));
+  });
+
+  return url.toString();
+}
+
+async function buildUpstreamResponse(upstream, text, extra = {}) {
+  const upstreamType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+
+  if (looksLikeJson(upstreamType, text)) {
+    return new Response(text, {
+      status: upstream.status,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store'
+      }
+    });
+  }
+
+  return jsonResponse({
+    ok: false,
+    status: upstream.status,
+    source: 'cloudflare_worker',
+    message: 'Apps Script returned a non-JSON response.',
+    upstreamContentType: upstreamType,
+    upstreamTitle: extractHtmlTitle(text),
+    upstreamBody: stripHtml(text).slice(0, 1000),
+    ...extra
+  }, 502);
 }
 
 export default {
@@ -87,6 +146,7 @@ export default {
 
       const text = await upstream.text();
       const upstreamType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+      const route = getRouteFromBody(outgoingBody);
 
       console.log('WORKER_APPS_SCRIPT_RESPONSE', JSON.stringify({
         upstreamStatus: upstream.status,
@@ -94,25 +154,29 @@ export default {
         bodyPreview: text.slice(0, 1000)
       }));
 
-      if (looksLikeJson(upstreamType, text)) {
-        return new Response(text, {
-          status: upstream.status,
-          headers: {
-            'content-type': 'application/json; charset=utf-8',
-            'cache-control': 'no-store'
-          }
+      if (!looksLikeJson(upstreamType, text) && isMissingDoPost(text) && canFallbackToGet(route)) {
+        const fallbackUrl = buildGetFallbackUrl(appsScriptUrl, outgoingBody);
+        const fallback = await fetch(fallbackUrl, {
+          method: 'GET',
+          redirect: 'follow'
+        });
+        const fallbackText = await fallback.text();
+        const fallbackType = fallback.headers.get('content-type') || 'application/json; charset=utf-8';
+
+        console.log('WORKER_APPS_SCRIPT_GET_FALLBACK_RESPONSE', JSON.stringify({
+          route,
+          upstreamStatus: fallback.status,
+          contentType: fallbackType,
+          bodyPreview: fallbackText.slice(0, 1000)
+        }));
+
+        return buildUpstreamResponse(fallback, fallbackText, {
+          fallback: 'GET',
+          originalUpstreamBody: stripHtml(text).slice(0, 300)
         });
       }
 
-      return jsonResponse({
-        ok: false,
-        status: upstream.status,
-        source: 'cloudflare_worker',
-        message: 'Apps Script returned a non-JSON response.',
-        upstreamContentType: upstreamType,
-        upstreamTitle: extractHtmlTitle(text),
-        upstreamBody: stripHtml(text).slice(0, 1000)
-      }, 502);
+      return buildUpstreamResponse(upstream, text);
     } catch (err) {
       console.log('WORKER_FORWARD_ERROR', String(err));
 

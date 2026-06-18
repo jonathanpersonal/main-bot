@@ -9,6 +9,8 @@ It is useful for:
 - Testing whether the configured Google deployment has `doGet`/`doPost`.
 - Keeping the bot pointed at one stable Worker URL while the upstream Apps
   Script deployment URL changes.
+- Falling back to `GET` for read-only routes if the Apps Script deployment says
+  `Script function not found: doPost`.
 
 It does not make a Google deployment without `doPost` process write actions.
 If Google returns `Script function not found: doPost`, redeploy the Apps Script
@@ -26,6 +28,17 @@ GOOGLE_SCRIPT_SECRET=your-existing-apps-script-secret
 Use a normal Cloudflare variable for `GOOGLE_SCRIPT_WEBAPP_URL`. Use a
 Cloudflare secret for `GOOGLE_SCRIPT_SECRET` if you want the Worker to inject it
 when the bot request does not already include one.
+
+The fallback only applies to:
+
+```text
+ping
+getPendingBotActions
+getRequestStatus
+```
+
+Write routes such as `submitBotRequest`, `markBotActionComplete`, and
+`markBotActionFailed` still require Apps Script `doPost`.
 
 ## Bot Env Vars
 
