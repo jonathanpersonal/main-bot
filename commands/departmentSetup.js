@@ -153,6 +153,7 @@ module.exports = {
     if (subcommand === 'role') return saveRole(interaction);
     if (subcommand === 'channel') return saveChannel(interaction);
     if (subcommand === 'rank-add') return addRank(interaction);
+    if (subcommand === 'rank-edit') return editRank(interaction, config);
     if (subcommand === 'rank-list') return listRanks(interaction, config);
     if (subcommand === 'google-sync') return googleSync(interaction, config);
     if (subcommand === 'dev-mode') return saveDevMode(interaction);
