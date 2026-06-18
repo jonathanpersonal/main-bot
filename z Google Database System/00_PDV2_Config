@@ -51,6 +51,11 @@ var PDV2 = {
     ACTIVITY_NOTICES: 'ActivityNotices',
     CADET_TRACKER: 'CadetTracker',
     AUDIT_LOG: 'AuditLog',
+    PROBATIONARY_ROSTER: 'ProbationaryRoster',
+    PROBATION_RIDEALONGS: 'ProbationRideAlongs',
+    PROBATION_FEEDBACK: 'ProbationFeedback',
+    PROBATION_DECISIONS: 'ProbationDecisions',
+    TRAINING_AUDIT: 'TrainingAudit',
     SCRIPT_LOGS: 'ScriptLogs'
   },
 
@@ -327,6 +332,16 @@ var PDV2 = {
       'Name (DO NOT TOUCH)',
       'Manual End Date'
     ],
+
+    ProbationaryRoster: ['Discord ID','Discord Username','Database Name','Callsign','Training Officer Discord ID','Probation Start','Current Cycle Start','Current Cycle End','Cycle Number','Max Cycles','Status','Ride-along Count','Feedback Count','Notes','Last Updated','Updated By','Final Decision','Graduation Date','Request ID'],
+
+    ProbationRideAlongs: ['RideAlong ID','Created At','Discord ID','Name','Conducted By Discord ID','Existing RideAlong Record ID','Notes','Request ID'],
+
+    ProbationFeedback: ['Feedback ID','Created At','Discord ID','Name','Result','Notes','Submitted By Discord ID','Request ID'],
+
+    ProbationDecisions: ['Decision ID','Created At','Discord ID','Name','Decision','Notes','Submitted By Discord ID','Status','Request ID'],
+
+    TrainingAudit: ['Audit ID','Created At','Action Type','Discord ID','Name','Actor Discord ID','Reason','Payload JSON','Request ID'],
 
     AuditLog: [
       'Audit ID',

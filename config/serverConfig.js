@@ -7,7 +7,8 @@ module.exports = {
     generalLogs: null,
     officerManagementLogs: null,
     trainingLogs: null,
-    ticketLogs: null
+    ticketLogs: null,
+    probationLogs: null
   },
 
   logging: {
@@ -280,6 +281,77 @@ Regards,
 {commandTeamName}`
         }
       }
+    }
+  },
+
+
+  training: {
+    enabled: true,
+    publicRosterUrl: 'PUBLIC_ROSTER_URL_PLACEHOLDER',
+    steamGroupUrl: 'STEAM_GROUP_URL_PLACEHOLDER',
+    cadetDeadlineDays: 14,
+    cadetReminderDays: 3,
+    cadetRoleIds: ['1177028178749952141'],
+    applicantRoleIds: [],
+    trainingOfficerRoleIds: ['1513618583530508298'],
+    trainingCommandRoleIds: ['1513618608134291458'],
+    commandApprovalChannelId: '',
+    deadlineCheck: {
+      enabled: true,
+      runOnStartup: true,
+      dailyTime: '0 9 * * *',
+      timezone: 'America/New_York',
+      reminderDaysBeforeDeadline: 3,
+      autoTerminatePastDeadline: true,
+      terminationReason: 'Failure to complete training - may reapply in 7 days.',
+      reapplyAfterDays: 7
+    },
+    messages: {
+      cadetApproved: 'You have been approved as a cadet. Deadline: {deadline}. Roster: {publicRosterUrl}',
+      cadetDenied: 'Your application/training review was denied. Reason: {reason}',
+      cadetDeadlineReminder: 'Reminder: your cadet training deadline is {deadline}. Roster: {publicRosterUrl}',
+      cadetAutoTerminated: 'Your cadet status has been removed. Reason: {reason}',
+      trainingPassed: `Hello {dbName},
+
+Congrats on passing your {departmentName} Basic Training. Your callsign is {callsign}. Please follow the steps below:
+
+Update in all Hypnotic or department discords
+
+TBD TEAMSPEAK MENTION
+
+Click the button below to request steam group access. Please make sure you request to join the following steam group before clicking the button below:
+{steamGroupUrl}
+
+If you have any questions, do not hesitate to ask a member of your CoC!
+
+Kind Regards,
+
+{departmentName} Command Staff`
+    }
+  },
+
+  probation: {
+    enabled: true,
+    cycleDays: 4,
+    maxDays: 8,
+    maxCycles: 2,
+    requiredRideAlongCount: 1,
+    allowTrainingOfficerExtension: true,
+    maxTrainingOfficerExtensions: 1,
+    commandApprovalRequiredForRemoval: true,
+    trainingOfficerRoleIds: ['1513618583530508298'],
+    ftoCommandRoleIds: ['1513618608134291458'],
+    departmentCommandRoleIds: [],
+    probationaryRoleIds: [],
+    graduationRankKey: 'Officer',
+    firstOfficerRankRoleId: '',
+    firstOfficerPermissionRoleId: '',
+    messages: {
+      started: 'Your probationary period has started.',
+      passed: 'Congratulations {dbName}, you passed probation.',
+      failedCycle: 'Your current probation cycle was not passed. A new cycle has started.',
+      removalRequested: 'Probationary removal was requested and is pending command review.',
+      removed: 'You have been removed from probationary officer status.'
     }
   },
 

@@ -14,6 +14,8 @@ const { getServerConfig } = require('../utils/configUtils');
 const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
 const { sendApplicationReviewLog, sendCadetTrainingLog } = require('../utils/logUtils');
 const { applyConfiguredRoleChanges, formatRoleChangeResult } = require('../utils/roleUtils');
+const { canManageTraining } = require('../utils/permissionUtils');
+const { approveCadet, denyCadet, completeTrainingPass } = require('../utils/trainingWorkflowUtils');
 
 const pendingTrainingActions = new Map();
 const FLOW_LABELS = { app: 'Application Review', cadet: 'Cadet Training' };
@@ -28,12 +30,20 @@ module.exports = {
       .setRequired(true)
       .addChoices(
         { name: 'Application Review', value: 'application_review' },
-        { name: 'Cadet Training', value: 'cadet_training' }
+        { name: 'Cadet Training', value: 'cadet_training' },
+        { name: 'Review Applicant - Approve', value: 'review_approve' },
+        { name: 'Review Applicant - Deny', value: 'review_deny' },
+        { name: 'Complete Training - Pass', value: 'complete_pass' },
+        { name: 'Complete Training - Fail', value: 'complete_fail' }
       ))
     .addUserOption((option) => option
       .setName('officer')
       .setDescription('The officer/cadet to review.')
-      .setRequired(true)),
+      .setRequired(true))
+    .addStringOption((option) => option
+      .setName('reason')
+      .setDescription('Reason/notes for direct review, status, or completion actions.')
+      .setRequired(false)),
 
   async execute(interaction) {
     const serverConfig = getServerConfig(interaction.guildId);
@@ -51,6 +61,10 @@ module.exports = {
 
     if (!memberCanUseTraining(interaction.member, serverConfig)) {
       return interaction.reply({ content: 'You are not authorized to use training management.', ephemeral: true });
+    }
+
+    if (['review_approve', 'review_deny', 'complete_pass', 'complete_fail'].includes(action)) {
+      return handleDirectTrainingAction(interaction, action, officerUser, serverConfig);
     }
 
     const sessionId = createSessionId();
@@ -97,6 +111,28 @@ module.exports = {
     return false;
   }
 };
+
+async function handleDirectTrainingAction(interaction, action, officerUser, serverConfig) {
+  const officerMember = await interaction.guild.members.fetch(officerUser.id).catch(() => null);
+  if (!officerMember) return interaction.reply({ content: 'That user is not in this server.', ephemeral: true });
+  const reason = interaction.options.getString('reason') || '';
+  await interaction.deferReply({ ephemeral: true });
+  if ((action === 'review_approve' || action === 'review_deny') && !canManageTraining(interaction.member, serverConfig, 'command')) {
+    return interaction.editReply('You need a configured training command/command staff role to approve or deny applicants.');
+  }
+  if ((action === 'complete_pass' || action === 'complete_fail') && !canManageTraining(interaction.member, serverConfig, 'officer')) {
+    return interaction.editReply('You need a configured training officer/command role to complete training.');
+  }
+  let result;
+  if (action === 'review_approve') result = await approveCadet({ interaction, member: officerMember, reason });
+  if (action === 'review_deny') result = await denyCadet({ interaction, member: officerMember, reason });
+  if (action === 'complete_pass') result = await completeTrainingPass({ interaction, member: officerMember, notes: reason });
+  if (action === 'complete_fail') {
+    result = await denyCadet({ interaction, member: officerMember, reason: reason || 'Training failed' });
+  }
+  const google = result?.googleResult?.ok ? 'Google updated' : `Google warning: ${result?.googleResult?.error?.message || 'not configured or failed safely'}`;
+  return interaction.editReply(`${action.replace(/_/g, ' ')} completed for ${officerUser}. ${google}`);
+}
 
 function memberCanUseTraining(member, serverConfig) {
   const cfg = serverConfig.trainingManagement || {};

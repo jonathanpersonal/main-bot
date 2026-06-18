@@ -1,0 +1,39 @@
+/*************************************************************
+ * Department Database v2
+ * File: 15_PDV2_TrainingProbation
+ * Idempotent setup helpers for Patch 3 training/probation tabs.
+ *************************************************************/
+
+function pdv2EnsureTrainingProbationSheets_() {
+  [
+    PDV2.SHEETS.CADET_TRACKER,
+    PDV2.SHEETS.TRAINING_RECORDS,
+    PDV2.SHEETS.PROBATIONARY_ROSTER,
+    PDV2.SHEETS.PROBATION_RIDEALONGS,
+    PDV2.SHEETS.PROBATION_FEEDBACK,
+    PDV2.SHEETS.PROBATION_DECISIONS,
+    PDV2.SHEETS.BOT_ACTIONS,
+    PDV2.SHEETS.TRAINING_AUDIT
+  ].forEach(function(sheetName) {
+    if (sheetName) pdv2EnsureSheet_(sheetName);
+  });
+  return pdv2Success_({ message: 'Training/probation sheets ensured.' });
+}
+
+function pdv2AppendTrainingAudit_(actionType, data, requestId) {
+  data = data || {};
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : data;
+  var row = {
+    'Audit ID': pdv2GenerateId_('TRNAUD'),
+    'Created At': pdv2Now_(),
+    'Action Type': actionType,
+    'Discord ID': pdv2Pick_(data, ['targetDiscordId', 'discordId'], '') || pdv2Pick_(payload, ['targetDiscordId', 'discordId'], ''),
+    'Name': pdv2Pick_(data, ['targetName', 'name'], '') || pdv2Pick_(payload, ['targetName', 'name', 'dbName'], ''),
+    'Actor Discord ID': pdv2Pick_(data, ['submittedByDiscordId', 'actorDiscordId'], ''),
+    'Reason': pdv2Pick_(data, ['reason'], ''),
+    'Payload JSON': pdv2SafeJson_(pdv2SanitizeForStorage_(payload)),
+    'Request ID': requestId
+  };
+  pdv2AppendObject_(PDV2.SHEETS.TRAINING_AUDIT, row);
+  return row;
+}
