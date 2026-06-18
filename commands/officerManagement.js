@@ -845,8 +845,6 @@ async function confirmRankChange({
     changedAt
   });
 
-<<<<<<< ours
-=======
   await interaction.editReply({
     content: [
       `${officerUser} was successfully ${actionPastTense}.`,
@@ -862,7 +860,6 @@ async function confirmRankChange({
     components: []
   });
 
->>>>>>> theirs
   const oldRankRoleIds = getRankRoleIdsForPayload(currentRank);
   const newRankRoleIds = getRankRoleIdsForPayload(targetRank);
   const removedRoleIds = oldRankRoleIds.filter((roleId) => !newRankRoleIds.includes(roleId));
@@ -914,20 +911,12 @@ async function confirmRankChange({
       `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
       `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`,
       '',
-<<<<<<< ours
-      googleResult.ok === false
-        ? `⚠️ Discord roles were changed, but Google logging failed: ${googleResult.error.message}`
-        : 'Google rank-change event submitted.'
-=======
       buildGoogleSubmissionStatus(googleResult)
->>>>>>> theirs
     ].join('\n'),
     components: []
   });
 }
 
-<<<<<<< ours
-=======
 
 function buildGoogleSubmissionStatus(googleResult) {
   if (googleResult?.ok === false) {
@@ -947,7 +936,6 @@ function buildGoogleSubmissionStatus(googleResult) {
   ].filter(Boolean).join('\n');
 }
 
->>>>>>> theirs
 function getRankRoleIdsForPayload(rank) {
   return [rank?.rankRoleId, rank?.permissionRoleId].filter((roleId) => {
     return roleId && typeof roleId === 'string' && !roleId.startsWith('PUT_') && !roleId.startsWith('PASTE_');
