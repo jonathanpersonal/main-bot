@@ -84,6 +84,14 @@ function pdv2RouteRequest_(data, options) {
   if (normalizedRoute === 'markbotactioncomplete') return pdv2MarkBotActionComplete_(data);
   if (normalizedRoute === 'markbotactionfailed') return pdv2MarkBotActionFailed_(data);
   if (normalizedRoute === 'getrequeststatus') return pdv2GetRequestStatus_(pdv2Pick_(data, ['requestId'], ''));
+  if (normalizedRoute === 'lookup_officer') return pdv2LookupOfficerForBot_(data);
+  if (normalizedRoute === 'sync_officer_from_google') return pdv2SyncOfficerFromGoogleForBot_(data);
+  if (normalizedRoute === 'sync_officer_completed') return pdv2Success_({ recorded: true });
+  if (normalizedRoute === 'sync_officer_failed') return pdv2Success_({ recorded: true });
+  if (normalizedRoute === 'manual_officer_update') return pdv2ManualOfficerUpdateForBot_(data);
+  if (normalizedRoute === 'manual_officer_update_completed') return pdv2Success_({ recorded: true });
+  if (normalizedRoute === 'manual_officer_update_failed') return pdv2Success_({ recorded: true });
+  if (normalizedRoute === 'import_existing_users') return pdv2ImportExistingUsersForBot_(data);
 
   if (normalizedRoute === 'upsertdatabaserecord') {
     return pdv2UpsertDatabaseRecord_(data.record || data, {
@@ -126,4 +134,100 @@ function pdv2RouteRequest_(data, options) {
       'getOfficerProfile'
     ]
   });
+}
+
+/*************************************************************
+ * Officer lookup/sync/manual/import API helpers added for bot.
+ *************************************************************/
+function pdv2OfficerApiRecord_(rowResult) {
+  if (!rowResult || !rowResult.ok) return null;
+  var r = rowResult.record || {};
+  return {
+    dbName: pdv2String_(r['Name']),
+    discordId: pdv2String_(r['Discord ID']),
+    discordUsername: pdv2String_(r['Username']),
+    callsign: pdv2String_(r['Current Callsign']),
+    rank: pdv2String_(r['Rank']),
+    rankKey: pdv2String_(r['Rank Key'] || r['Rank']),
+    status: pdv2String_(r['Status']),
+    departmentStatus: pdv2String_(r['Department Status']),
+    activeStatus: pdv2String_(r['Active Status']),
+    department: pdv2String_(r['Department']),
+    joinDate: pdv2String_(r['Join Date']),
+    probationStatus: pdv2String_(r['Probation Status']),
+    trainingOfficer: pdv2String_(r['Training Officer']),
+    trainingStatus: pdv2String_(r['Training Status']),
+    cadetDeadline: pdv2String_(r['Cadet Deadline']),
+    probationStart: pdv2String_(r['Probation Start']),
+    probationEnd: pdv2String_(r['Probation End']),
+    latestChange: pdv2String_(r['Latest Change']),
+    currentCycleHours: pdv2String_(r['Current Cycle Hours']),
+    previousCycleHours: pdv2String_(r['Previous Cycle Hours']),
+    publicNotes: pdv2String_(r['Public Notes']),
+    internalNotes: pdv2String_(r['Internal Notes']),
+    steam64: pdv2String_(r['Steam 64']),
+    teamspeakId: pdv2String_(r['TeamSpeak ID']),
+    recordId: pdv2String_(r['Record ID'] || rowResult.rowNumber),
+    rowNumber: rowResult.rowNumber
+  };
+}
+
+function pdv2LookupOfficerForBot_(data) {
+  var discordId = pdv2String_(pdv2Pick_(data, ['discordId', 'targetDiscordId'], ''));
+  if (!discordId) return pdv2Fail_('Missing Discord ID for officer lookup.');
+  var found = pdv2GetDatabaseRecordByDiscordId_(discordId);
+  if (!found.ok) return pdv2Success_({ found: false, discordId: discordId });
+  return pdv2Success_({ found: true, officer: pdv2OfficerApiRecord_(found) });
+}
+
+function pdv2SyncOfficerFromGoogleForBot_(data) {
+  return pdv2LookupOfficerForBot_(data);
+}
+
+function pdv2ManualOfficerUpdateForBot_(data) {
+  var discordId = pdv2String_(pdv2Pick_(data, ['discordId', 'targetDiscordId'], ''));
+  var field = pdv2String_(pdv2Pick_(data, ['field'], ''));
+  var value = pdv2Pick_(data, ['value'], '');
+  if (!discordId) return pdv2Fail_('Missing Discord ID for manual officer update.');
+  if (!field) return pdv2Fail_('Missing field for manual officer update.');
+  var map = {
+    rank: 'Rank', callsign: 'Current Callsign', status: 'Status', activeStatus: 'Active Status',
+    departmentStatus: 'Department Status', trainingStatus: 'Training Status', cadetStatus: 'Cadet Status',
+    probationStatus: 'Probation Status', trainingOfficer: 'Training Officer', notes: 'Notes',
+    publicNotes: 'Public Notes', internalNotes: 'Internal Notes', steam64: 'Steam 64', teamspeakId: 'TeamSpeak ID'
+  };
+  var header = map[field] || field;
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
+  if (!row) return pdv2Fail_('No Database record found for Discord ID ' + discordId + '.');
+  var update = {}; update[header] = value; update['Latest Change'] = pdv2Now_();
+  pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, update);
+  pdv2Audit_('BOT', 'MANUAL_OFFICER_UPDATE', pdv2Pick_(data, ['requestedByDiscordId'], ''), 'Database', discordId, '', { field: field, header: header, reason: pdv2Pick_(data, ['reason'], '') });
+  return pdv2Success_({ updated: true, found: true, officer: pdv2OfficerApiRecord_(pdv2GetDatabaseRecordByDiscordId_(discordId)) });
+}
+
+function pdv2ImportExistingUsersForBot_(data) {
+  var users = data.users || [];
+  var counts = { created: 0, updated: 0, skipped: 0, errors: [], records: [] };
+  users.forEach(function(u) {
+    try {
+      var existing = pdv2GetDatabaseRecordByDiscordId_(u.discordId);
+      var upsert = pdv2UpsertDatabaseRecord_({
+        discordId: u.discordId,
+        username: u.discordUsername,
+        displayName: u.discordDisplayName,
+        name: u.discordDisplayName,
+        rank: u.detectedRankName || u.detectedRankKey || 'Unknown/Pending',
+        steam64: u.steam64 || '',
+        teamspeakId: u.teamspeakId || '',
+        department: u.guildId,
+        status: 'Active'
+      }, { source: 'DISCORD_IMPORT', actor: data.requestedByDiscordId || u.importedByDiscordId || '' });
+      if (!upsert.ok) { counts.errors.push({ discordId: u.discordId, error: upsert.error }); return; }
+      if (existing.ok) counts.updated++; else counts.created++;
+      counts.records.push({ discordId: u.discordId, mode: existing.ok ? 'updated' : 'created' });
+    } catch (err) {
+      counts.errors.push({ discordId: u.discordId, error: String(err) });
+    }
+  });
+  return pdv2Success_(counts);
 }

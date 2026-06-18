@@ -29,12 +29,16 @@ const defaultGuildConfig = {
     supervisorRoleIds: [],
     trainingStaffRoleIds: [],
     iaStaffRoleIds: [],
-    ticketStaffRoleIds: [],
     highCommandRoleIds: [],
     botAdminRoleIds: [],
     trainingOfficerRoleIds: [],
     ftoCommandRoleIds: [],
-    departmentCommandRoleIds: []
+    departmentCommandRoleIds: [],
+    ticketStaffRoleIds: [],
+    lookupRoleIds: [],
+    syncRoleIds: [],
+    manualOfficerUpdateRoleIds: [],
+    importUsersRoleIds: []
   },
   ranks: [],
   channels: {
@@ -54,6 +58,37 @@ const defaultGuildConfig = {
     enabled: false,
     webhookUrl: '',
     pollingUrl: ''
+  },
+  lookup: {
+    enabled: true,
+    showInternalNotesToHighCommandOnly: true,
+    logLookups: false
+  },
+  sync: {
+    enabled: true,
+    dryRunDefault: true,
+    updateNickname: true,
+    nicknameFormat: '{callsign} | {name}',
+    removeOldRankRoles: true,
+    removeOldPermissionRoles: true,
+    inactiveBehavior: 'preview_only',
+    logChannelId: ''
+  },
+  manualOfficerUpdate: {
+    enabled: true,
+    requireConfirmation: true,
+    updateGoogleFirst: true,
+    updateDiscordRoles: true,
+    updateNickname: true,
+    allowLocalOnlyFallback: false,
+    logChannelId: ''
+  },
+  importUsers: {
+    enabled: true,
+    dryRunDefault: true,
+    requireConfirmation: true,
+    batchSize: 10,
+    logChannelId: ''
   },
   training: {
     enabled: true,
