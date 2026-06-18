@@ -389,6 +389,39 @@ function pdv2ActivityReportStatusLabel_(status) {
   return pdv2String_(status);
 }
 
+function pdv2ShouldIssueActivityReportStrike_(finding) {
+  finding = finding || {};
+  if (pdv2Bool_(pdv2Pick_(finding, ['autoStrikeCreated'], false), false)) return true;
+  if (pdv2Upper_(pdv2Pick_(finding, ['disciplineAction'], '')) === 'AUTO_ACTIVITY_STRIKE_1') return true;
+  return pdv2Upper_(pdv2Pick_(finding, ['activityStatus'], '')) === 'INACTIVE' &&
+    Number(pdv2Pick_(finding, ['inactiveStreak'], 0)) === 1 &&
+    pdv2Bool_(pdv2GetConfigValue_('ACTIVITY_REPORT_AUTO_STRIKE_1_ENABLED', 'TRUE'), true);
+}
+
+function pdv2IssueActivityReportStrike_(finding, data, requestId) {
+  var discordId = pdv2String_(pdv2Pick_(finding, ['targetDiscordId', 'discordId', 'userId'], ''));
+  if (!discordId) return pdv2Fail_('Missing Discord ID for activity report strike.');
+
+  var strikeLevel = Number(pdv2Pick_(finding, ['autoStrikeLevel', 'inactiveStreak'], 1)) || 1;
+  var cycleStart = pdv2Pick_(data, ['cycleStart'], '');
+  var cycleEnd = pdv2Pick_(data, ['cycleEnd'], '');
+  var totalHours = pdv2Pick_(finding, ['totalHours'], '');
+  var reason = 'Activity requirement not met for ' + cycleStart + ' through ' + cycleEnd + '. Recorded hours: ' + totalHours + '.';
+
+  return pdv2IssueActivityNotice_(Object.assign({}, data, {
+    targetDiscordId: discordId,
+    rank: pdv2Pick_(finding, ['rank'], ''),
+    actionType: 'ACTIVITY_STRIKE_ISSUED',
+    noticeType: 'STRIKE',
+    strikeLevel: String(strikeLevel),
+    noticeLevel: String(strikeLevel),
+    reason: reason,
+    notes: pdv2Pick_(finding, ['notes'], '') || 'Created from activity report ' + pdv2Pick_(data, ['cycleId'], '') + '.',
+    issuedByDiscordId: pdv2Pick_(data, ['submittedByDiscordId'], ''),
+    issuedAt: pdv2Now_()
+  }), requestId);
+}
+
 function pdv2ApplyActivityReportToDatabase_(data, requestId) {
   data = data || {};
   var dryRun = pdv2Bool_(pdv2Pick_(data, ['dryRun'], false), false);
@@ -396,6 +429,8 @@ function pdv2ApplyActivityReportToDatabase_(data, requestId) {
   var updated = 0;
   var skipped = 0;
   var missing = 0;
+  var strikesIssued = 0;
+  var strikeResults = [];
   var errors = [];
 
   if (dryRun) {
@@ -437,6 +472,11 @@ function pdv2ApplyActivityReportToDatabase_(data, requestId) {
         updates['Current Cycle Hours'] = pdv2FormatMinutesAsHoursMinutes_(totalMinutes) || '00:00';
       }
       pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, updates);
+      if (pdv2ShouldIssueActivityReportStrike_(finding)) {
+        var strikeResult = pdv2IssueActivityReportStrike_(finding, data, requestId);
+        strikeResults.push(strikeResult);
+        if (strikeResult && strikeResult.ok) strikesIssued++;
+      }
       updated++;
     } catch (err) {
       errors.push({ discordId: discordId, error: String(err) });
@@ -451,6 +491,7 @@ function pdv2ApplyActivityReportToDatabase_(data, requestId) {
     updated: updated,
     skipped: skipped,
     missing: missing,
+    strikesIssued: strikesIssued,
     errors: errors.slice(0, 10)
   });
 
@@ -460,6 +501,8 @@ function pdv2ApplyActivityReportToDatabase_(data, requestId) {
     updated: updated,
     skipped: skipped,
     missing: missing,
+    strikesIssued: strikesIssued,
+    strikeResults: strikeResults,
     errors: errors
   });
 }

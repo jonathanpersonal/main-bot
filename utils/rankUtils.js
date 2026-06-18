@@ -1,70 +1,96 @@
-function getMemberRank(member, serverConfig) {
-  if (!member || !member.roles || !member.roles.cache) {
-    return null;
-  }
+function getConfiguredRanks(guildConfig) {
+  if (!guildConfig || !Array.isArray(guildConfig.ranks)) return [];
+  return sortRanksByOrder(guildConfig.ranks);
+}
 
-  if (!serverConfig || !Array.isArray(serverConfig.ranks)) {
-    return null;
-  }
+function getMemberRank(member, guildConfig) {
+  if (!member?.roles?.cache) return null;
 
+  const ranks = getConfiguredRanks(guildConfig);
   const memberRoleIds = member.roles.cache.map((role) => role.id);
+  const matchedRanks = ranks.filter((rank) => memberRoleIds.includes(rank.rankRoleId));
 
-  const matchedRanks = serverConfig.ranks.filter((rank) => {
-    return memberRoleIds.includes(rank.rankRoleId);
-  });
+  if (matchedRanks.length === 0) return null;
 
-  if (matchedRanks.length === 0) {
-    return null;
-  }
-
-  matchedRanks.sort((a, b) => b.level - a.level);
-
+  // Rank order convention: higher `order` (or legacy `level`) means a higher rank.
+  matchedRanks.sort((a, b) => getRankOrder(b) - getRankOrder(a));
   return matchedRanks[0];
 }
 
-function getRankByName(rankName, serverConfig) {
-  if (!rankName || !serverConfig || !Array.isArray(serverConfig.ranks)) {
-    return null;
-  }
+function getRankByName(arg1, arg2) {
+  const { guildConfig, rankName } = normalizeConfigAndValue(arg1, arg2);
+  if (!rankName) return null;
 
-  return serverConfig.ranks.find((rank) => {
-    return rank.name.toLowerCase() === rankName.toLowerCase();
+  return getConfiguredRanks(guildConfig).find((rank) => {
+    return rank.name?.toLowerCase() === String(rankName).toLowerCase();
   }) || null;
 }
 
-function getRankByLevel(level, serverConfig) {
-  if (!serverConfig || !Array.isArray(serverConfig.ranks)) {
-    return null;
-  }
-
-  return serverConfig.ranks.find((rank) => {
-    return rank.level === level;
-  }) || null;
+function getRankByRoleId(guildConfig, roleId) {
+  if (!roleId) return null;
+  return getConfiguredRanks(guildConfig).find((rank) => rank.rankRoleId === roleId) || null;
 }
 
-function getNextHigherRanks(currentRank, serverConfig) {
-  if (!currentRank || !serverConfig || !Array.isArray(serverConfig.ranks)) {
-    return [];
-  }
-
-  return serverConfig.ranks
-    .filter((rank) => rank.level > currentRank.level)
-    .sort((a, b) => a.level - b.level);
+function getRankByLevel(level, guildConfig) {
+  return getConfiguredRanks(guildConfig).find((rank) => getRankOrder(rank) === level) || null;
 }
 
-function getNextLowerRanks(currentRank, serverConfig) {
-  if (!currentRank || !serverConfig || !Array.isArray(serverConfig.ranks)) {
-    return [];
-  }
+function sortRanksByOrder(ranks) {
+  if (!Array.isArray(ranks)) return [];
+  return ranks.slice().sort((a, b) => getRankOrder(a) - getRankOrder(b));
+}
 
-  return serverConfig.ranks
-    .filter((rank) => rank.level < currentRank.level)
-    .sort((a, b) => b.level - a.level);
+function getHigherRanks(arg1, arg2) {
+  const { guildConfig, currentRank } = normalizeConfigAndRank(arg1, arg2);
+  if (!currentRank) return [];
+  return getConfiguredRanks(guildConfig).filter((rank) => getRankOrder(rank) > getRankOrder(currentRank));
+}
+
+function getLowerRanks(arg1, arg2) {
+  const { guildConfig, currentRank } = normalizeConfigAndRank(arg1, arg2);
+  if (!currentRank) return [];
+  return getConfiguredRanks(guildConfig)
+    .filter((rank) => getRankOrder(rank) < getRankOrder(currentRank))
+    .sort((a, b) => getRankOrder(b) - getRankOrder(a));
+}
+
+function getNextHigherRanks(currentRank, guildConfig) {
+  return getHigherRanks(guildConfig, currentRank);
+}
+
+function getNextLowerRanks(currentRank, guildConfig) {
+  return getLowerRanks(guildConfig, currentRank);
+}
+
+function getRankOrder(rank) {
+  if (!rank) return 0;
+  if (Number.isFinite(rank.order)) return rank.order;
+  if (Number.isFinite(rank.level)) return rank.level;
+  return 0;
+}
+
+function normalizeConfigAndValue(arg1, arg2) {
+  if (typeof arg1 === 'string') {
+    return { rankName: arg1, guildConfig: arg2 };
+  }
+  return { guildConfig: arg1, rankName: arg2 };
+}
+
+function normalizeConfigAndRank(arg1, arg2) {
+  if (arg1 && Array.isArray(arg1.ranks)) {
+    return { guildConfig: arg1, currentRank: arg2 };
+  }
+  return { currentRank: arg1, guildConfig: arg2 };
 }
 
 module.exports = {
+  getConfiguredRanks,
   getMemberRank,
   getRankByName,
+  getRankByRoleId,
+  sortRanksByOrder,
+  getHigherRanks,
+  getLowerRanks,
   getRankByLevel,
   getNextHigherRanks,
   getNextLowerRanks

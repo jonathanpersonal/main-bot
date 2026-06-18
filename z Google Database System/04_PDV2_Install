@@ -55,6 +55,7 @@ function pdv2SeedSystemConfig_() {
     ['HOURS_CYCLE_START_DATE', '', 'Current cycle start date when script-managed hours are enabled.'],
     ['HOURS_CYCLE_END_DATE', '', 'Current cycle end date when script-managed hours are enabled.'],
     ['ACTIVITY_STATUS_UPDATE_ON_PATROL_LOG', 'TRUE', 'TRUE/FALSE toggle to update Database Active Status when patrol hours change.'],
+    ['ACTIVITY_REPORT_AUTO_STRIKE_1_ENABLED', 'TRUE', 'TRUE/FALSE toggle to create ActivityNotices Strike 1 from live activity report inactive-streak-1 findings.'],
     ['ACTIVITY_ACTIVE_HOURS_DEFAULT', '2.5', 'Default current-cycle hours required for Active status when no rank-specific threshold is configured.'],
     ['ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT', '2', 'Default current-cycle hours required for Semi Active status when no rank-specific threshold is configured.'],
     ['ACTIVITY_EXEMPT_RANKS', 'Chief, Deputy Chief, Commander', 'Comma/newline separated rank names that should show Exempt for activity.'],

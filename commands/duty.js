@@ -1061,6 +1061,10 @@ function buildActivityReportGooglePayload(report, cycleRange, dryRun) {
       loaExempt: finding.loaExempt,
       exemptReason: finding.exemptReason,
       inactiveStreak: finding.inactiveStreak,
+      disciplineAction: finding.disciplineAction,
+      autoStrikeCreated: finding.autoStrikeCreated,
+      autoStrikeLevel: finding.autoStrikeLevel,
+      autoStrikeReference: finding.autoStrikeReference,
       notes: finding.notes
     }))
   };
