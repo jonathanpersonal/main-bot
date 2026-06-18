@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits, MessageFlags } = require('discord.js');
 const ticketUtils = require('./utils/ticketUtils');
 const { loadCommands } = require('./handlers/commandHandler');
 const { getServerConfig, validateServerConfig } = require('./utils/configUtils');
@@ -139,7 +139,7 @@ async function handleInteraction(interaction) {
   if (!command) {
     return interaction.reply({
       content: 'This command was not found.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 
@@ -165,7 +165,7 @@ async function handleTicketInteraction(interaction) {
       else if (customId === 'ticket:lockdown') await ticketUtils.lockTicket(interaction);
       else if (customId === 'ticket:unlock') await ticketUtils.unlockTicket(interaction);
       else if (customId === 'ticket:close' || customId === 'ticket:close_confirm') await ticketUtils.closeTicket(interaction);
-      else if (customId === 'ticket:close_cancel') await interaction.reply({ content: 'Ticket close cancelled.', ephemeral: true });
+      else if (customId === 'ticket:close_cancel') await interaction.reply({ content: 'Ticket close cancelled.', flags: MessageFlags.Ephemeral });
       else return false;
       return true;
     }
@@ -214,7 +214,7 @@ async function sendInteractionError(interaction) {
 
   const errorMessage = {
     content: 'There was an error while running this command.',
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   };
 
   if (interaction.replied || interaction.deferred) {
