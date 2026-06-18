@@ -527,7 +527,7 @@ Internal Affairs Team`
 
       approverRoleIds: [],
 
-      includeRoleIds: [`1177028178749952141`],
+      includeRoleIds: [`1513618583530508298`],
       excludeRoleIds: [],
 
       semiActiveBlocksPromotion: true,
