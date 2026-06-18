@@ -1,0 +1,133 @@
+/*************************************************************
+ * Department Database v2
+ * File: 14_PDV2_CallsignRosterSync
+ * -----------------------------------------------------------
+ * Purpose:
+ *   Rebuild/sync CallsignRegistry assignment state from the
+ *   main Database roster sheet.
+ *************************************************************/
+
+function pdv2NormalizeCallsign_(value) {
+  return pdv2String_(value).toUpperCase().replace(/\s+/g, '');
+}
+
+function pdv2GetCallsignFromDatabaseRecord_(record) {
+  return pdv2NormalizeCallsign_(record && record['Current Callsign']);
+}
+
+function pdv2IsActiveDatabaseOfficer_(record) {
+  var status = pdv2String_(record && record['Status']).toLowerCase();
+  if (!status) return true;
+  return status.indexOf('inactive') < 0 && status.indexOf('resign') < 0 && status.indexOf('termin') < 0;
+}
+
+function pdv2RegistryStatus_(row) {
+  return pdv2Upper_(pdv2Pick_(row || {}, ['Status', 'Slot Status'], ''));
+}
+
+function pdv2RegistryUpdates_(row, updates) {
+  var out = {};
+  Object.keys(updates || {}).forEach(function(header) {
+    if (row.hasOwnProperty(header) || header === 'Callsign') out[header] = updates[header];
+  });
+  if (row.hasOwnProperty('Status') && updates.Status) out.Status = updates.Status;
+  if (row.hasOwnProperty('Slot Status') && updates.Status) out['Slot Status'] = updates.Status;
+  if (row.hasOwnProperty('Updated At')) out['Updated At'] = pdv2Now_();
+  if (row.hasOwnProperty('Last Updated')) out['Last Updated'] = pdv2Now_();
+  return out;
+}
+
+function pdv2PreviewCallsignRegistrySync_() {
+  return pdv2SyncCallsignRegistryFromDatabase_({ preview: true });
+}
+
+function pdv2RebuildCallsignRegistryFromDatabase_() {
+  return pdv2SyncCallsignRegistryFromDatabase_({ allowOverwrite: true, repairMode: true });
+}
+
+function pdv2SyncCallsignRegistryFromDatabase_(options) {
+  options = options || {};
+  var preview = options.preview === true;
+  var allowOverwrite = options.allowOverwrite === true || options.repairMode === true;
+  var summary = {
+    scannedDatabaseRows: 0,
+    assignedFromDatabase: 0,
+    alreadyMatched: 0,
+    addedToRegistry: 0,
+    updatedRegistryRows: 0,
+    duplicateCallsigns: [],
+    inactiveAssignments: [],
+    warnings: []
+  };
+
+  var registryRows = pdv2ListRows_(PDV2.SHEETS.CALLSIGN_REGISTRY);
+  var registryByCallsign = {};
+  registryRows.forEach(function(row) {
+    var key = pdv2NormalizeCallsign_(row['Callsign']);
+    if (key && !registryByCallsign[key]) registryByCallsign[key] = row;
+  });
+
+  var seen = {};
+  var dbRows = pdv2ListRows_(PDV2.SHEETS.DATABASE);
+  dbRows.forEach(function(record) {
+    if ([record['Discord ID'], record['Name'], record['Username'], record['Rank'], record['Status'], record['Department'], record['Current Callsign']].join('').trim() === '') return;
+    summary.scannedDatabaseRows++;
+    var callsign = pdv2GetCallsignFromDatabaseRecord_(record);
+    if (!callsign) return;
+
+    var discordId = pdv2String_(record['Discord ID']);
+    var rosterInfo = { callsign: callsign, discordId: discordId, name: record['Name'], username: record['Username'], rank: record['Rank'], department: record['Department'], rowNumber: record.__rowNumber };
+    if (!pdv2IsActiveDatabaseOfficer_(record)) summary.inactiveAssignments.push(rosterInfo);
+    if (seen[callsign] && seen[callsign] !== discordId) summary.duplicateCallsigns.push({ callsign: callsign, discordIds: [seen[callsign], discordId] });
+    seen[callsign] = discordId;
+    summary.assignedFromDatabase++;
+
+    var registry = registryByCallsign[callsign];
+    if (!registry) {
+      summary.addedToRegistry++;
+      if (!preview) pdv2AppendObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, {
+        'Slot ID': pdv2GenerateId_('SLOT'), 'Callsign': callsign, 'Status': 'ASSIGNED', 'Slot Status': 'ASSIGNED',
+        'Assigned Discord ID': discordId, 'Assigned Name': record['Name'], 'Assigned Username': record['Username'],
+        'Assigned Rank': record['Rank'], 'Rank': record['Rank'], 'Department': record['Department'],
+        'Assigned At': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()), 'Assigned Date': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()),
+        'Assigned By': 'DATABASE_SYNC', 'Request ID': '', 'Source': 'Database', 'Notes': 'Synced from Database roster.', 'Updated At': pdv2Now_(), 'Last Updated': pdv2Now_()
+      });
+      return;
+    }
+
+    var assignedId = pdv2String_(registry['Assigned Discord ID']);
+    var status = pdv2RegistryStatus_(registry);
+    if (assignedId && assignedId !== discordId) {
+      summary.warnings.push('Callsign ' + callsign + ' is assigned to ' + assignedId + ' in registry but ' + discordId + ' in Database.');
+      if (!preview && allowOverwrite) pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, registry.__rowNumber, pdv2RegistryUpdates_(registry, { Status: 'CONFLICT', Notes: 'Conflict detected during Database sync.' }));
+      return;
+    }
+
+    if (assignedId === discordId && status === 'ASSIGNED') {
+      summary.alreadyMatched++;
+    } else {
+      summary.updatedRegistryRows++;
+      if (!preview) pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, registry.__rowNumber, pdv2RegistryUpdates_(registry, {
+        Status: 'ASSIGNED', 'Assigned Discord ID': discordId, 'Assigned Name': record['Name'], 'Assigned Username': record['Username'],
+        'Assigned Rank': record['Rank'], Rank: record['Rank'], Department: record['Department'], 'Assigned At': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()),
+        'Assigned Date': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()), 'Assigned By': 'DATABASE_SYNC', Source: 'Database', Notes: 'Synced from Database roster.'
+      }));
+    }
+  });
+
+  pdv2Audit_('SHEET_MENU', preview ? 'CALLSIGN_REGISTRY_SYNC_PREVIEW' : 'CALLSIGN_REGISTRY_SYNC', '', 'CallsignRegistry', '', '', summary);
+  return pdv2Success_(summary);
+}
+
+function pdv2GetCallsignRegistrySummary_() {
+  var counts = { available: 0, assigned: 0, reserved: 0, disabled: 0, conflict: 0 };
+  pdv2ListRows_(PDV2.SHEETS.CALLSIGN_REGISTRY).forEach(function(row) {
+    var status = pdv2RegistryStatus_(row);
+    if (status === 'OPEN' || status === 'RELEASED' || status === 'AVAILABLE' || status === '') counts.available++;
+    else if (status === 'ASSIGNED') counts.assigned++;
+    else if (status === 'RESERVED') counts.reserved++;
+    else if (status === 'DISABLED') counts.disabled++;
+    else if (status === 'CONFLICT') counts.conflict++;
+  });
+  return pdv2Success_(counts);
+}

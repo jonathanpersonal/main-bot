@@ -7,108 +7,112 @@ function pdv2NormalizeRank_(rank) {
   return pdv2String_(rank).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function pdv2OfficerHasCallsign_(record) {
+  return !!pdv2String_(record && record['Current Callsign']);
+}
+
+function pdv2CallsignAssignableForRank_(rank) {
+  var configured = pdv2String_(pdv2GetConfigValue_('CALLSIGN_ASSIGNABLE_RANKS', ''));
+  if (!configured) return true;
+  var wanted = pdv2NormalizeRank_(rank);
+  return configured.split(/[;,\n|]+/).some(function(item) { return pdv2NormalizeRank_(item) === wanted; });
+}
+
 function pdv2FindAssignedCallsignByDiscordId_(discordId) {
   var rows = pdv2ListRows_(PDV2.SHEETS.CALLSIGN_REGISTRY);
   for (var i = 0; i < rows.length; i++) {
-    if (pdv2String_(rows[i]['Assigned Discord ID']) === pdv2String_(discordId) && pdv2Upper_(rows[i]['Slot Status']) === 'ASSIGNED') {
-      return rows[i];
-    }
+    var status = pdv2Upper_(pdv2Pick_(rows[i], ['Status', 'Slot Status'], ''));
+    if (pdv2String_(rows[i]['Assigned Discord ID']) === pdv2String_(discordId) && status === 'ASSIGNED') return rows[i];
+  }
+  return null;
+}
+
+function pdv2FindAvailableCallsignRow_(rank) {
+  var normalized = pdv2NormalizeRank_(rank);
+  var rows = pdv2ListRows_(PDV2.SHEETS.CALLSIGN_REGISTRY);
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var status = pdv2Upper_(pdv2Pick_(row, ['Status', 'Slot Status'], ''));
+    var rankOk = !normalized || !pdv2String_(row['Rank']) || pdv2NormalizeRank_(row['Rank']) === normalized || pdv2NormalizeRank_(row['Assigned Rank']) === normalized;
+    if ((status === 'AVAILABLE' || status === 'OPEN' || status === 'RELEASED' || status === '') && rankOk) return row;
   }
   return null;
 }
 
 function pdv2FindOpenCallsignSlotForRank_(rank) {
-  var normalized = pdv2NormalizeRank_(rank);
-  var rows = pdv2ListRows_(PDV2.SHEETS.CALLSIGN_REGISTRY);
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i];
-    var status = pdv2Upper_(row['Slot Status']);
-    if ((status === 'OPEN' || status === 'RELEASED' || status === '') && pdv2NormalizeRank_(row['Rank']) === normalized) {
-      return row;
-    }
+  return pdv2FindAvailableCallsignRow_(rank);
+}
+
+function pdv2WriteCallsignHistory_(data) {
+  data = data || {};
+  return pdv2AppendObject_(PDV2.SHEETS.CALLSIGN_HISTORY, {
+    'Timestamp': pdv2Now_(),
+    'Action': pdv2Pick_(data, ['action'], 'ASSIGN'),
+    'Discord ID': pdv2Pick_(data, ['discordId'], ''),
+    'Name': pdv2Pick_(data, ['name'], ''),
+    'Old Rank': pdv2Pick_(data, ['oldRank'], ''),
+    'New Rank': pdv2Pick_(data, ['newRank', 'rank'], ''),
+    'Old Callsign': pdv2Pick_(data, ['oldCallsign'], ''),
+    'New Callsign': pdv2Pick_(data, ['newCallsign', 'callsign'], ''),
+    'Request ID': pdv2Pick_(data, ['requestId'], ''),
+    'Notes': pdv2Pick_(data, ['notes'], '')
+  });
+}
+
+function pdv2AssignCallsignIfNeeded_(record, options) {
+  options = options || {};
+  record = record || {};
+  var discordId = pdv2String_(record['Discord ID']);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for callsign assignment.');
+  var existingCallsign = pdv2String_(record['Current Callsign']);
+  var onlyIfEmpty = pdv2Bool_(pdv2GetConfigValue_('CALLSIGN_ASSIGN_ONLY_IF_EMPTY', 'TRUE'), true);
+  if (existingCallsign && options.force !== true && onlyIfEmpty) {
+    return pdv2Success_({ assigned: false, callsign: existingCallsign, message: 'Officer already has a callsign.' });
   }
-  return null;
+  if (!pdv2CallsignAssignableForRank_(record['Rank'])) {
+    return pdv2Success_({ assigned: false, callsign: existingCallsign, message: 'Officer rank is not configured for callsign assignment.' });
+  }
+  return pdv2AssignNextAvailableCallsign_(record, options);
+}
+
+function pdv2AssignNextAvailableCallsign_(data, options) {
+  options = options || {};
+  data = data || {};
+  var discordId = pdv2String_(data['Discord ID'] || data.discordId || data.targetDiscordId);
+  var name = pdv2String_(data['Name'] || data.name || data.targetName);
+  var username = pdv2String_(data['Username'] || data.username || data.discordUsername);
+  var rank = pdv2String_(data['Rank'] || data.rank || data.newRank);
+  var department = pdv2String_(data['Department'] || data.department || data.departmentKey);
+  var current = pdv2FindAssignedCallsignByDiscordId_(discordId);
+  if (current && options.force !== true) return pdv2Success_({ assigned: false, callsign: current['Callsign'], message: 'Officer already has a callsign.' });
+
+  var next = pdv2FindAvailableCallsignRow_(rank);
+  if (!next) {
+    pdv2Audit_('GOOGLE_SYSTEM', 'CALLSIGN_ASSIGNMENT_SKIPPED_NO_SLOT', options.actor || '', 'Database', discordId, options.requestId || '', { rank: rank });
+    return pdv2Fail_('No available callsigns found.', { assigned: false, callsign: '', message: 'No available callsigns found.' });
+  }
+
+  var callsign = pdv2NormalizeCallsign_(next['Callsign']);
+  var now = pdv2Now_();
+  var registryUpdates = {
+    'Status': 'ASSIGNED', 'Slot Status': 'ASSIGNED', 'Assigned Discord ID': discordId, 'Assigned Name': name,
+    'Assigned Username': username, 'Assigned Rank': rank, 'Assigned Date': now, 'Assigned At': now,
+    'Assigned By': options.actor || 'GOOGLE_SYSTEM', 'Request ID': options.requestId || '', 'Source': options.source || 'RankChange',
+    'Released Date': '', 'Last Updated': now, 'Updated At': now, 'Notes': 'Assigned by Google v2 callsign engine.'
+  };
+  pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, next.__rowNumber, registryUpdates);
+  pdv2WriteDatabaseCallsign_(discordId, callsign);
+  pdv2WriteCallsignHistory_({ discordId: discordId, name: name, oldRank: options.oldRank || '', newRank: rank, oldCallsign: '', newCallsign: callsign, requestId: options.requestId || '', notes: 'Assigned from CallsignRegistry.' });
+  pdv2Audit_('GOOGLE_SYSTEM', 'CALLSIGN_ASSIGNED', options.actor || '', 'Database', discordId, options.requestId || '', { newCallsign: callsign, newRank: rank });
+  return pdv2Success_({ assigned: true, callsign: callsign, message: 'Callsign assigned.' });
 }
 
 function pdv2AssignCallsignForRank_(discordId, name, oldRank, newRank, requestId, actor) {
-  discordId = pdv2String_(discordId);
-  name = pdv2String_(name);
-  newRank = pdv2String_(newRank);
-  if (!discordId || !newRank) return pdv2Fail_('Missing Discord ID or rank for callsign assignment.');
-
-  var current = pdv2FindAssignedCallsignByDiscordId_(discordId);
-  if (current && pdv2NormalizeRank_(current['Rank']) === pdv2NormalizeRank_(newRank)) {
-    pdv2WriteDatabaseCallsign_(discordId, current['Callsign']);
-    return pdv2Success_({
-      changed: false,
-      callsign: current['Callsign'],
-      message: 'Officer already has a callsign for this rank.'
-    });
-  }
-
-  var next = pdv2FindOpenCallsignSlotForRank_(newRank);
-  if (!next) {
-    pdv2Audit_('GOOGLE_SYSTEM', 'CALLSIGN_ASSIGNMENT_SKIPPED_NO_SLOT', actor || '', 'Database', discordId, requestId || '', { newRank: newRank });
-    return pdv2Fail_('No open callsign slot found for rank: ' + newRank, { newRank: newRank });
-  }
-
-  if (current) {
-    pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, current.__rowNumber, {
-      'Slot Status': 'RELEASED',
-      'Assigned Discord ID': '',
-      'Assigned Name': '',
-      'Released Date': pdv2Now_(),
-      'Last Updated': pdv2Now_(),
-      'Notes': 'Released during reassignment to ' + newRank
-    });
-  }
-
-  pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, next.__rowNumber, {
-    'Slot Status': 'ASSIGNED',
-    'Assigned Discord ID': discordId,
-    'Assigned Name': name,
-    'Assigned Date': pdv2Now_(),
-    'Released Date': '',
-    'Last Updated': pdv2Now_(),
-    'Notes': 'Assigned by Google v2 callsign engine.'
-  });
-
-  pdv2WriteDatabaseCallsign_(discordId, next['Callsign']);
-
-  pdv2AppendObject_(PDV2.SHEETS.CALLSIGN_HISTORY, {
-    'Timestamp': pdv2Now_(),
-    'Action': 'ASSIGN',
-    'Discord ID': discordId,
-    'Name': name,
-    'Old Rank': oldRank || (current ? current['Rank'] : ''),
-    'New Rank': newRank,
-    'Old Callsign': current ? current['Callsign'] : '',
-    'New Callsign': next['Callsign'],
-    'Request ID': requestId || '',
-    'Notes': 'Assigned from CallsignRegistry.'
-  });
-
-  pdv2Audit_('GOOGLE_SYSTEM', 'CALLSIGN_ASSIGNED', actor || '', 'Database', discordId, requestId || '', {
-    oldCallsign: current ? current['Callsign'] : '',
-    newCallsign: next['Callsign'],
-    newRank: newRank
-  });
-
-  return pdv2Success_({
-    changed: true,
-    oldCallsign: current ? current['Callsign'] : '',
-    newCallsign: next['Callsign'],
-    callsign: next['Callsign'],
-    message: 'Assigned callsign ' + next['Callsign'] + '.'
-  });
+  return pdv2AssignNextAvailableCallsign_({ 'Discord ID': discordId, 'Name': name, 'Rank': newRank }, { oldRank: oldRank, requestId: requestId, actor: actor, source: 'RankChange' });
 }
 
 function pdv2WriteDatabaseCallsign_(discordId, callsign) {
   var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
   if (!row) return;
-  pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, {
-    'Current Callsign': callsign,
-    'Callsign Updated': pdv2Now_(),
-    'Latest Change': pdv2Now_()
-  });
+  pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, { 'Current Callsign': callsign, 'Callsign Updated': pdv2Now_(), 'Latest Change': pdv2Now_() });
 }

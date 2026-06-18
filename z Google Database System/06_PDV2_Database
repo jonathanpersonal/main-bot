@@ -109,9 +109,24 @@ function pdv2SetDatabaseRank_(data, options) {
   });
 
   var callsignResult = null;
+  var assignOnPromote = pdv2Bool_(pdv2GetConfigValue_('CALLSIGN_ASSIGN_ON_PROMOTE', 'TRUE'), true);
+  var assignOnDemote = pdv2Bool_(pdv2GetConfigValue_('CALLSIGN_ASSIGN_ON_DEMOTE', 'FALSE'), false);
+  var assignOnSetRank = pdv2Bool_(pdv2GetConfigValue_('CALLSIGN_ASSIGN_ON_SET_RANK', 'FALSE'), false);
   var autoCallsign = pdv2Bool_(pdv2Pick_(data, ['autoCallsign', 'assignCallsign'], false), false);
-  if (autoCallsign) {
-    callsignResult = pdv2AssignCallsignForRank_(discordId, name || '', oldRank, newRank, options.requestId || '', options.actor || '');
+  var shouldAssignCallsign = autoCallsign ||
+    (actionType === 'PROMOTE' && assignOnPromote) ||
+    (actionType === 'DEMOTE' && assignOnDemote) ||
+    (actionType === 'SET_RANK' && assignOnSetRank);
+  if (shouldAssignCallsign && typeof pdv2AssignCallsignIfNeeded_ === 'function') {
+    var latestRecord = pdv2GetDatabaseRecordByDiscordId_(discordId);
+    callsignResult = pdv2AssignCallsignIfNeeded_(latestRecord.ok ? latestRecord.record : upsert.record, {
+      oldRank: oldRank,
+      requestId: options.requestId || '',
+      actor: options.actor || '',
+      source: options.source || 'RankChange'
+    });
+    var afterCallsignRecord = pdv2GetDatabaseRecordByDiscordId_(discordId);
+    if (afterCallsignRecord.ok) upsert.record = afterCallsignRecord.record;
   }
 
   pdv2Audit_(options.source || 'API', 'DATABASE_RANK_UPDATED', options.actor || '', 'Database', discordId, options.requestId || '', {
