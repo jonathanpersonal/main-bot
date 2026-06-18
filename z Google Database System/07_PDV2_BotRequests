@@ -44,10 +44,10 @@ function pdv2SubmitBotRequest_(data) {
 
   pdv2WithLock_(function() {
     pdv2AppendObject_(PDV2.SHEETS.BOT_REQUESTS, row);
-    pdv2Audit_(row.Source, 'BOT_REQUEST_RECEIVED', actor, 'BotRequests', requestId, requestId, {
-      actionType: actionType,
-      targetDiscordId: targetDiscordId
-    });
+  });
+  pdv2Audit_(row.Source, 'BOT_REQUEST_RECEIVED', actor, 'BotRequests', requestId, requestId, {
+    actionType: actionType,
+    targetDiscordId: targetDiscordId
   });
 
   var processResult;
@@ -67,15 +67,13 @@ function pdv2SubmitBotRequest_(data) {
   }
 
   var status = processResult.ok ? PDV2.STATUSES.REQUEST_PROCESSED : PDV2.STATUSES.REQUEST_FAILED;
-  pdv2WithLock_(function() {
-    var reqRow = pdv2FindRowByValue_(PDV2.SHEETS.BOT_REQUESTS, 'Request ID', requestId);
-    pdv2UpdateRowObject_(PDV2.SHEETS.BOT_REQUESTS, reqRow, {
-      'Updated At': pdv2Now_(),
-      'Status': status,
-      'Result JSON': pdv2SafeJson_(processResult),
-      'Error Message': processResult.ok ? '' : processResult.error,
-      'Completed At': pdv2Now_()
-    });
+  var reqRow = pdv2FindRowByValue_(PDV2.SHEETS.BOT_REQUESTS, 'Request ID', requestId);
+  pdv2UpdateRowObject_(PDV2.SHEETS.BOT_REQUESTS, reqRow, {
+    'Updated At': pdv2Now_(),
+    'Status': status,
+    'Result JSON': pdv2SafeJson_(processResult),
+    'Error Message': processResult.ok ? '' : processResult.error,
+    'Completed At': pdv2Now_()
   });
 
   return pdv2Success_({

@@ -55,51 +55,47 @@ function pdv2GetPendingBotActions_(data) {
 }
 
 function pdv2MarkBotActionComplete_(data) {
-  return pdv2WithLock_(function() {
-    var actionId = pdv2String_(pdv2Pick_(data || {}, ['actionId', 'id']));
-    if (!actionId) return pdv2Fail_('Missing actionId.');
+  var actionId = pdv2String_(pdv2Pick_(data || {}, ['actionId', 'id']));
+  if (!actionId) return pdv2Fail_('Missing actionId.');
 
-    var row = pdv2FindRowByValue_(PDV2.SHEETS.BOT_ACTIONS, 'Action ID', actionId);
-    if (!row) return pdv2Fail_('Bot action not found.', { actionId: actionId });
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.BOT_ACTIONS, 'Action ID', actionId);
+  if (!row) return pdv2Fail_('Bot action not found.', { actionId: actionId });
 
-    var saved = pdv2UpdateRowObject_(PDV2.SHEETS.BOT_ACTIONS, row, {
-      'Updated At': pdv2Now_(),
-      'Status': PDV2.STATUSES.ACTION_COMPLETE,
-      'Attempts': Number(pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.BOT_ACTIONS), row)['Attempts'] || 0) + 1,
-      'Last Attempt At': pdv2Now_(),
-      'Completed At': pdv2Now_(),
-      'Error Message': ''
-    });
-
-    pdv2Audit_('DISCORD_BOT', 'BOT_ACTION_COMPLETED', pdv2Pick_(data, ['completedBy', 'actor'], ''), 'BotActions', actionId, saved['Request ID'], {
-      result: data.result || {}
-    });
-
-    return pdv2Success_({ actionId: actionId, action: saved });
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.BOT_ACTIONS, row, {
+    'Updated At': pdv2Now_(),
+    'Status': PDV2.STATUSES.ACTION_COMPLETE,
+    'Attempts': Number(pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.BOT_ACTIONS), row)['Attempts'] || 0) + 1,
+    'Last Attempt At': pdv2Now_(),
+    'Completed At': pdv2Now_(),
+    'Error Message': ''
   });
+
+  pdv2Audit_('DISCORD_BOT', 'BOT_ACTION_COMPLETED', pdv2Pick_(data, ['completedBy', 'actor'], ''), 'BotActions', actionId, saved['Request ID'], {
+    result: data.result || {}
+  });
+
+  return pdv2Success_({ actionId: actionId, action: saved });
 }
 
 function pdv2MarkBotActionFailed_(data) {
-  return pdv2WithLock_(function() {
-    var actionId = pdv2String_(pdv2Pick_(data || {}, ['actionId', 'id']));
-    if (!actionId) return pdv2Fail_('Missing actionId.');
+  var actionId = pdv2String_(pdv2Pick_(data || {}, ['actionId', 'id']));
+  if (!actionId) return pdv2Fail_('Missing actionId.');
 
-    var row = pdv2FindRowByValue_(PDV2.SHEETS.BOT_ACTIONS, 'Action ID', actionId);
-    if (!row) return pdv2Fail_('Bot action not found.', { actionId: actionId });
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.BOT_ACTIONS, 'Action ID', actionId);
+  if (!row) return pdv2Fail_('Bot action not found.', { actionId: actionId });
 
-    var current = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.BOT_ACTIONS), row);
-    var saved = pdv2UpdateRowObject_(PDV2.SHEETS.BOT_ACTIONS, row, {
-      'Updated At': pdv2Now_(),
-      'Status': PDV2.STATUSES.ACTION_FAILED,
-      'Attempts': Number(current['Attempts'] || 0) + 1,
-      'Last Attempt At': pdv2Now_(),
-      'Error Message': pdv2Pick_(data, ['error', 'message'], 'Bot reported failure.')
-    });
-
-    pdv2Audit_('DISCORD_BOT', 'BOT_ACTION_FAILED', pdv2Pick_(data, ['completedBy', 'actor'], ''), 'BotActions', actionId, saved['Request ID'], {
-      error: saved['Error Message']
-    });
-
-    return pdv2Success_({ actionId: actionId, action: saved });
+  var current = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.BOT_ACTIONS), row);
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.BOT_ACTIONS, row, {
+    'Updated At': pdv2Now_(),
+    'Status': PDV2.STATUSES.ACTION_FAILED,
+    'Attempts': Number(current['Attempts'] || 0) + 1,
+    'Last Attempt At': pdv2Now_(),
+    'Error Message': pdv2Pick_(data, ['error', 'message'], 'Bot reported failure.')
   });
+
+  pdv2Audit_('DISCORD_BOT', 'BOT_ACTION_FAILED', pdv2Pick_(data, ['completedBy', 'actor'], ''), 'BotActions', actionId, saved['Request ID'], {
+    error: saved['Error Message']
+  });
+
+  return pdv2Success_({ actionId: actionId, action: saved });
 }

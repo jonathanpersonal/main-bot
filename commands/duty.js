@@ -1535,7 +1535,7 @@ async function replyFriendlyError(interaction) {
 }
 
 async function submitDutyGoogleEvent(interaction, actionType, payload = {}) {
-  return safeSubmitDepartmentEvent({
+  const submission = safeSubmitDepartmentEvent({
     actionType,
     interaction,
     actor: interaction.user,
@@ -1543,4 +1543,8 @@ async function submitDutyGoogleEvent(interaction, actionType, payload = {}) {
     targetName: payload.targetName || interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
     payload: { commandName: '/duty', ...payload }
   });
+  submission.catch((error) => {
+    console.warn(`Background Google duty event failed for ${actionType}:`, error);
+  });
+  return { ok: true, background: true };
 }
