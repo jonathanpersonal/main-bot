@@ -26,6 +26,37 @@ class GoogleTimeoutError extends Error {
   }
 }
 
+function stripHtml(value) {
+  return String(value || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractHtmlTitle(value) {
+  const match = String(value || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? stripHtml(match[1]) : '';
+}
+
+function buildNonJsonGoogleError(response, text) {
+  const title = extractHtmlTitle(text);
+  const body = stripHtml(text).slice(0, 500);
+  const details = [
+    `Google returned a non-JSON response`,
+    `HTTP ${response.status}`,
+    title ? `title="${title}"` : null,
+    body ? `body="${body}"` : null
+  ].filter(Boolean).join(': ');
+
+  const error = new Error(details);
+  error.googleStatus = response.status;
+  error.googleContentType = response.headers.get('content-type') || '';
+  error.googleResponseTitle = title;
+  return error;
+}
+
 async function postToGoogle(route, data = {}) {
   const config = getGoogleConfig();
 
@@ -58,7 +89,7 @@ async function postToGoogle(route, data = {}) {
     try {
       json = JSON.parse(text);
     } catch (error) {
-      throw new Error(`Google returned a non-JSON response: ${text.slice(0, 500)}`);
+      throw buildNonJsonGoogleError(response, text);
     }
 
     if (!response.ok) {
@@ -82,6 +113,10 @@ async function postToGoogle(route, data = {}) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function pingGoogle(data = {}) {
+  return postToGoogle('ping', data);
 }
 
 async function submitBotRequest(data = {}) {
@@ -111,6 +146,7 @@ module.exports = {
   GoogleTimeoutError,
   getGoogleConfig,
   postToGoogle,
+  pingGoogle,
   submitBotRequest,
   getPendingBotActions,
   markBotActionComplete,

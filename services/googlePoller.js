@@ -1,5 +1,6 @@
 const {
   getPendingBotActions,
+  pingGoogle,
   markBotActionComplete,
   markBotActionFailed
 } = require('../utils/googleWebhook');
@@ -121,6 +122,16 @@ function startGooglePoller(client) {
   pollerInterval = setInterval(run, config.intervalMs);
   pollerInterval.unref?.();
   console.log(`Google poller started. intervalMs=${config.intervalMs} limit=${config.limit}`);
+  pingGoogle().then((result) => {
+    console.log('Google web app ping succeeded:', {
+      version: result.version,
+      instanceMode: result.instanceMode,
+      serverName: result.serverName,
+      authorized: result.authorized
+    });
+  }).catch((error) => {
+    console.error('Google web app ping failed:', error);
+  });
   run();
   return true;
 }
