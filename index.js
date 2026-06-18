@@ -10,6 +10,7 @@ const { startLoaDailySyncScheduler } = require('./utils/loaSync');
 const { startGooglePoller } = require('./services/googlePoller');
 const { startCadetDeadlineService } = require('./services/cadetDeadlineService');
 const { startProbationCheckService } = require('./services/probationCheckService');
+const { logServerError } = require('./utils/errorLogUtils');
 
 const isDevOnlyEnabled = typeof permissionUtils.isDevOnlyEnabled === 'function'
   ? permissionUtils.isDevOnlyEnabled
@@ -75,6 +76,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await handleInteraction(interaction);
   } catch (error) {
     console.error('Unhandled interaction error:', error);
+    await logServerError(interaction, error, { commandName: interaction.commandName, customId: interaction.customId, guildId: interaction.guildId });
     await sendInteractionError(interaction).catch((replyError) => {
       console.error('Could not send interaction error response:', replyError);
     });
@@ -145,6 +147,7 @@ async function handleInteraction(interaction) {
     await command.execute(interaction, client);
   } catch (error) {
     console.error(`Error running /${interaction.commandName}:`, error);
+    await logServerError(interaction, error, { commandName: interaction.commandName, guildId: interaction.guildId });
     await sendInteractionError(interaction);
   }
 }
@@ -182,6 +185,7 @@ async function handleTicketInteraction(interaction) {
     }
   } catch (error) {
     console.error('Error handling ticket interaction:', error);
+    await logServerError(interaction, error, { customId, guildId: interaction.guildId });
     await sendInteractionError(interaction);
     return true;
   }
@@ -198,6 +202,7 @@ async function handleCommandInteraction(interaction, handlerName, interactionTyp
       if (wasHandled) return;
     } catch (error) {
       console.error(`Error handling ${interactionTypeLabel} interaction:`, error);
+      await logServerError(interaction, error, { interactionTypeLabel, customId: interaction.customId, guildId: interaction.guildId });
       await sendInteractionError(interaction);
       return;
     }

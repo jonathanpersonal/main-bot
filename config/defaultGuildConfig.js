@@ -6,10 +6,22 @@ const defaultRank = {
   permissionRoleId: '',
   order: 0,
   level: 0,
+  department: 'main',
+  assignCallsign: false,
+  active: true,
+  notes: '',
   isCommandStaff: false,
   isSupervisor: false,
   isProbationary: false,
   isRecruit: false,
+  isActivityExempt: false,
+  isActivityCadet: false,
+  activity: {
+    activeHours: null,
+    semiActiveHours: null,
+    exempt: false,
+    cadet: false
+  },
   promotion: {
     minimumDaysInRank: 0,
     blocksIfLOA: true,
@@ -68,7 +80,8 @@ const defaultGuildConfig = {
     probationLogs: null
   },
   logging: {
-    staffLogChannelId: ''
+    staffLogChannelId: '',
+    serverErrorLogChannelId: ''
   },
   roles: {
     departmentMemberRoleId: '',
@@ -115,7 +128,8 @@ const defaultGuildConfig = {
     ticketPanelChannelId: '',
     staffLogChannelId: '',
     commandApprovalChannelId: '',
-    probationLogChannelId: ''
+    probationLogChannelId: '',
+    serverErrorLogChannelId: ''
   },
 
   google: {
@@ -564,6 +578,14 @@ Regards,
     completed: false,
     updatedAt: '',
     updatedBy: ''
+  },
+
+  setupWizard: {
+    inProgress: false,
+    step: '',
+    startedBy: '',
+    startedAt: '',
+    updatedAt: ''
   }
 };
 
@@ -582,6 +604,10 @@ function createDefaultRank(rankData = {}) {
   const merged = {
     ...defaultRank,
     ...rankData,
+    activity: {
+      ...defaultRank.activity,
+      ...(rankData.activity || {})
+    },
     promotion: {
       ...defaultRank.promotion,
       ...(rankData.promotion || {})
