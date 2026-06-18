@@ -17,7 +17,12 @@ function onOpen() {
     .addItem('Add Me As Super Admin', 'pdv2MenuAddMeAsSuperAdmin')
     .addSeparator()
     .addItem('Seed Starter Departments + Ranks', 'pdv2MenuSeedStarterConfig')
-    .addItem('Seed Demo Callsign Slots', 'pdv2MenuSeedDemoCallsignSlots')
+    .addSeparator()
+    .addSubMenu(ui.createMenu('Callsigns')
+      .addItem('Preview Callsign Registry Sync', 'pdv2MenuPreviewCallsignRegistrySync')
+      .addItem('Sync Registry From Database', 'pdv2MenuSyncCallsignRegistryFromDatabase')
+      .addItem('View Callsign Registry Summary', 'pdv2MenuViewCallsignRegistrySummary')
+      .addItem('Seed Demo Callsign Slots', 'pdv2MenuSeedDemoCallsignSlots'))
     .addSeparator()
     .addItem('Show Setup Checklist', 'pdv2MenuShowSetupChecklist')
     .addToUi();
@@ -80,6 +85,25 @@ function pdv2MenuAddMeAsSuperAdmin() {
 function pdv2MenuSeedStarterConfig() {
   var result = pdv2SeedStarterConfig_();
   SpreadsheetApp.getUi().alert('Starter config seeded.\n\nDepartments added: ' + result.departmentsAdded + '\nRanks added: ' + result.ranksAdded);
+}
+
+
+function pdv2MenuPreviewCallsignRegistrySync() {
+  var result = pdv2PreviewCallsignRegistrySync_();
+  SpreadsheetApp.getUi().alert('Callsign registry sync preview:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuSyncCallsignRegistryFromDatabase() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert('Sync Registry From Database', 'This updates/adds CallsignRegistry assignment rows from active Database roster callsigns. Continue?', ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) return;
+  var result = pdv2SyncCallsignRegistryFromDatabase_();
+  ui.alert('Callsign registry sync complete:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuViewCallsignRegistrySummary() {
+  var result = pdv2GetCallsignRegistrySummary_();
+  SpreadsheetApp.getUi().alert('Callsign registry summary:\n\nAvailable: ' + result.available + '\nAssigned: ' + result.assigned + '\nReserved: ' + result.reserved + '\nDisabled: ' + result.disabled + '\nConflict: ' + result.conflict);
 }
 
 function pdv2MenuSeedDemoCallsignSlots() {
