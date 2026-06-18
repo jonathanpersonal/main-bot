@@ -110,3 +110,82 @@ npm start
 ```
 
 After `npm run setup`, edit `.env`, then copy/rename the generated starter guild config example to `data/guildConfigs/<your guild id>.json` and fill in server-specific role/channel IDs.
+
+## Repair/Compatibility Setup Updates
+
+### Dev-only mode
+
+Manual guild config option:
+
+```js
+devOnly: {
+  enabled: true,
+  userIds: ['YOUR_DISCORD_USER_ID'],
+  roleIds: ['YOUR_DEV_ROLE_ID'],
+  bypassForBotAdmins: true
+}
+```
+
+Use Discord IDs, not names. Add yourself or a dev role before enabling dev mode. Bot admins can bypass when `bypassForBotAdmins` is `true`.
+
+Command setup:
+
+```text
+/department-setup dev-mode enabled:true
+/department-setup dev-mode enabled:true user:@You role:@DevRole
+/department-setup dev-mode-add-user user:@User
+/department-setup dev-mode-add-role role:@Role
+```
+
+### Guided setup walkthrough
+
+```text
+/department-setup walkthrough
+```
+
+The walkthrough explains dev mode, department identity, roles, log channels, Google integration, ranks, tickets, and final review. It saves progress in local guild config under `setupWizard`.
+
+### Rank setup
+
+Existing command still works:
+
+```text
+/department-setup rank-add name: rank-role: order:
+```
+
+Optional fields now include:
+
+```text
+rank-key
+permission-role
+department
+assign-callsign
+active
+activity-active-hours
+activity-semi-active-hours
+activity-exempt
+activity-cadet
+notes
+```
+
+Rank add saves local config only. It does not automatically push anything to Google Sheets.
+
+### Explicit rank sync to Google
+
+Only run this when you are ready to push locally configured ranks to the Google `Ranks` sheet:
+
+```text
+/department-setup google-sync target:ranks
+```
+
+Google integration must be enabled and configured first. Keep secrets in environment variables such as `GOOGLE_API_SECRET`, `BOT_API_SECRET`, `GOOGLE_WEBAPP_URL`, and `GOOGLE_WORKER_URL` when possible.
+
+### Server error log channel
+
+Configure a Discord channel for sanitized runtime errors:
+
+```text
+/department-setup channel type:server-errors channel:#server-errors
+```
+
+Secrets, tokens, and Discord webhook URLs are redacted before error details are sent.
