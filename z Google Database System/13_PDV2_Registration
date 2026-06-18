@@ -246,11 +246,21 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
         actor: actor,
         requestId: requestId
       });
+      var resultRecord = rankResult && rankResult.record ? rankResult.record : {};
       pdv2CreateBotAction_({
         requestId: requestId,
         actionType: 'OFFICER_MANAGEMENT_RESULT',
         targetDiscordId: targetDiscordId,
-        payload: { actionType: actionType, requestId: requestId, result: rankResult }
+        payload: {
+          actionType: actionType,
+          requestId: requestId,
+          guildId: pdv2Pick_(data, ['guildId'], '') || pdv2Pick_(payload, ['guildId'], ''),
+          targetDiscordId: targetDiscordId,
+          targetName: pdv2Pick_(resultRecord, ['Name'], '') || targetName,
+          callsign: rankResult && rankResult.callsign ? rankResult.callsign.callsign : '',
+          callsignAssigned: !!(rankResult && rankResult.callsign && rankResult.callsign.assigned),
+          result: rankResult
+        }
       });
       return rankResult;
     }

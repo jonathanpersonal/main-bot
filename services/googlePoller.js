@@ -39,6 +39,71 @@ function getActionPayload(action) {
   return payload || {};
 }
 
+function getSingleCachedGuild(client) {
+  const guilds = Array.from(client.guilds.cache.values());
+  return guilds.length === 1 ? guilds[0] : null;
+}
+
+function buildCallsignNickname(callsign, name) {
+  const cleanCallsign = String(callsign || '').trim();
+  const cleanName = String(name || '').trim();
+  if (!cleanCallsign || !cleanName) return null;
+
+  const prefix = `${cleanCallsign} | `;
+  const maxNameLength = Math.max(1, 32 - prefix.length);
+  return `${prefix}${cleanName.slice(0, maxNameLength)}`;
+}
+
+async function updateMemberCallsignNickname(client, action, payload) {
+  const result = payload.result || {};
+  const callsignResult = result.callsign || {};
+  const assigned = payload.callsignAssigned === true || callsignResult.assigned === true;
+  const callsign = payload.callsign || callsignResult.callsign;
+
+  if (!assigned || !callsign) {
+    return {
+      handledAt: new Date().toISOString(),
+      handledBy: 'googlePoller',
+      nicknameUpdated: false,
+      reason: 'No newly assigned callsign in result.'
+    };
+  }
+
+  const targetDiscordId = payload.targetDiscordId || action.targetDiscordId || result.discordId;
+  if (!targetDiscordId) throw new Error('OFFICER_MANAGEMENT_RESULT is missing targetDiscordId for nickname update.');
+
+  const guildId = payload.guildId || result.guildId;
+  const guild = guildId
+    ? await client.guilds.fetch(guildId)
+    : getSingleCachedGuild(client);
+  if (!guild) throw new Error('OFFICER_MANAGEMENT_RESULT is missing guildId and the bot is not in exactly one cached guild.');
+
+  const member = await guild.members.fetch(targetDiscordId);
+  const databaseName = payload.targetName || result.record?.Name || member.displayName || member.user.username;
+  const nickname = buildCallsignNickname(callsign, databaseName);
+  if (!nickname) throw new Error('Could not build callsign nickname from Google result.');
+
+  if (member.displayName === nickname) {
+    return {
+      handledAt: new Date().toISOString(),
+      handledBy: 'googlePoller',
+      nicknameUpdated: false,
+      nickname,
+      reason: 'Nickname already matched.'
+    };
+  }
+
+  await member.setNickname(nickname, `Google callsign assigned: ${callsign}`);
+  return {
+    handledAt: new Date().toISOString(),
+    handledBy: 'googlePoller',
+    nicknameUpdated: true,
+    guildId: guild.id,
+    targetDiscordId,
+    nickname
+  };
+}
+
 function startGooglePoller(client) {
   const config = getPollingConfig();
 
@@ -100,6 +165,12 @@ async function processActionSafely(client, action) {
 
 async function processBotAction(client, action, actionType) {
   const payload = getActionPayload(action);
+
+  if (actionType === 'OFFICER_MANAGEMENT_RESULT') {
+    const nicknameResult = await updateMemberCallsignNickname(client, action, payload);
+    console.log('Google officer management result handled:', nicknameResult);
+    return nicknameResult;
+  }
 
   if (RESULT_ACTION_TYPES.has(actionType)) {
     console.log(`Google result action received: ${actionType}`, payload);
