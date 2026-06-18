@@ -170,14 +170,6 @@ notes
 
 Rank add saves local config only. It does not automatically push anything to Google Sheets.
 
-To edit an existing rank without removing and re-adding it, use:
-
-```text
-/department-setup rank-edit name:
-```
-
-The `name` option accepts the current rank name or rank key. Optional edit fields include `rank-role`, `order`, `rank-key`, `permission-role`, `department`, `assign-callsign`, `active`, the activity fields, command/staff flags, and `minimum-days`. Rank edits also save locally only until you run the explicit Google sync.
-
 ### Explicit rank sync to Google
 
 Only run this when you are ready to push locally configured ranks to the Google `Ranks` sheet:
