@@ -6,6 +6,7 @@ const { loadCommands } = require('./handlers/commandHandler');
 const { validateServerConfig } = require('./utils/configUtils');
 const { handleAppealInteraction } = require('./utils/appealUtils');
 const { startLoaDailySyncScheduler } = require('./utils/loaSync');
+const { startGooglePoller } = require('./services/googlePoller');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
@@ -20,6 +21,12 @@ client.once(Events.ClientReady, (readyClient) => {
     startLoaDailySyncScheduler(readyClient);
   } catch (error) {
     console.error('Could not start LOA daily sync scheduler:', error);
+  }
+
+  try {
+    startGooglePoller(readyClient);
+  } catch (error) {
+    console.error('Could not start Google poller:', error);
   }
 });
 
