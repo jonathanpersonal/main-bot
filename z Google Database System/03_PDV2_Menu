@@ -37,6 +37,9 @@ function onOpen() {
     .addItem('Create Local Bot Test Request', 'pdv2MenuCreateLocalBotTestRequest')
     .addItem('View Pending Bot Action Count', 'pdv2MenuPendingBotActionCount')
     .addSeparator()
+    .addItem('Redo Selected Bot Request', 'pdv2MenuRedoSelectedBotRequest')
+    .addItem('Redo Bot Request By ID', 'pdv2MenuRedoBotRequestById')
+    .addSeparator()
     .addItem('Clear TEST Bot Requests/Actions', 'pdv2MenuClearTestRows')
     .addToUi();
 }
@@ -193,6 +196,141 @@ function pdv2MenuCreateLocalBotTestRequest() {
 function pdv2MenuPendingBotActionCount() {
   var actions = pdv2GetPendingBotActions_({ max: 100 });
   SpreadsheetApp.getUi().alert('Pending bot actions: ' + actions.actions.length);
+}
+
+function pdv2MenuRedoSelectedBotRequest() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getActiveSheet();
+  if (!sh || sh.getName() !== PDV2.SHEETS.BOT_REQUESTS) {
+    ui.alert('Select a row on the BotRequests sheet first.');
+    return;
+  }
+
+  var rowNumber = sh.getActiveRange().getRow();
+  if (rowNumber < 2) {
+    ui.alert('Select a BotRequests data row, not the header row.');
+    return;
+  }
+
+  var record = pdv2RowToObject_(sh, rowNumber);
+  var requestId = pdv2String_(record['Request ID']);
+  var actionType = pdv2String_(record['Action Type']);
+  if (!requestId) {
+    ui.alert('The selected row does not have a Request ID.');
+    return;
+  }
+
+  var response = ui.alert(
+    'Redo Bot Request',
+    'Redo ' + actionType + ' request ' + requestId + '? This can repeat sheet writes for actions that append rows.',
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) return;
+
+  var result = pdv2RedoBotRequest_(requestId);
+  ui.alert('Redo complete:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuRedoBotRequestById() {
+  var ui = SpreadsheetApp.getUi();
+  var prompt = ui.prompt('Redo Bot Request', 'Enter the Request ID to reprocess:', ui.ButtonSet.OK_CANCEL);
+  if (prompt.getSelectedButton() !== ui.Button.OK) return;
+
+  var requestId = pdv2String_(prompt.getResponseText());
+  if (!requestId) {
+    ui.alert('No Request ID entered.');
+    return;
+  }
+
+  var recordResult = pdv2GetRequestStatus_(requestId);
+  if (!recordResult.ok) {
+    ui.alert('Request not found:\n\n' + JSON.stringify(recordResult, null, 2));
+    return;
+  }
+
+  var actionType = pdv2String_(recordResult.request['Action Type']);
+  var response = ui.alert(
+    'Redo Bot Request',
+    'Redo ' + actionType + ' request ' + requestId + '? This can repeat sheet writes for actions that append rows.',
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) return;
+
+  var result = pdv2RedoBotRequest_(requestId);
+  ui.alert('Redo complete:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2RedoBotRequest_(requestId) {
+  requestId = pdv2String_(requestId);
+  if (!requestId) return pdv2Fail_('Request ID is required.');
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.BOT_REQUESTS, 'Request ID', requestId);
+  if (!row) return pdv2Fail_('Request not found.', { requestId: requestId });
+
+  var sh = pdv2EnsureSheet_(PDV2.SHEETS.BOT_REQUESTS);
+  var record = pdv2RowToObject_(sh, row);
+  var actionType = pdv2Upper_(record['Action Type']);
+  if (!actionType) return pdv2Fail_('Stored request is missing Action Type.', { requestId: requestId });
+
+  var payload = {};
+  var rawPayload = pdv2String_(record['Payload JSON']);
+  if (rawPayload) {
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch (err) {
+      return pdv2Fail_('Stored Payload JSON could not be parsed: ' + String(err), { requestId: requestId });
+    }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) payload = {};
+
+  var replayData = Object.assign({}, payload, {
+    source: pdv2Pick_(record, ['Source'], 'SHEET_MENU'),
+    actionType: actionType,
+    submittedByDiscordId: pdv2Pick_(record, ['Submitted By Discord ID'], ''),
+    targetDiscordId: pdv2Pick_(record, ['Target Discord ID'], ''),
+    targetName: pdv2Pick_(record, ['Target Name'], ''),
+    oldRank: pdv2Pick_(record, ['Old Rank'], ''),
+    newRank: pdv2Pick_(record, ['New Rank'], ''),
+    reason: pdv2Pick_(record, ['Reason'], ''),
+    payload: payload
+  });
+
+  pdv2UpdateRowObject_(PDV2.SHEETS.BOT_REQUESTS, row, {
+    'Updated At': pdv2Now_(),
+    'Status': PDV2.STATUSES.REQUEST_RECEIVED,
+    'Result JSON': '',
+    'Error Message': '',
+    'Completed At': ''
+  });
+
+  pdv2Audit_('SHEET_MENU', 'BOT_REQUEST_REDO_STARTED', Session.getActiveUser().getEmail(), 'BotRequests', requestId, requestId, {
+    actionType: actionType
+  });
+
+  var processResult = pdv2ProcessBotRequest_(requestId, actionType, replayData);
+  var status = processResult.ok ? PDV2.STATUSES.REQUEST_PROCESSED : PDV2.STATUSES.REQUEST_FAILED;
+
+  pdv2UpdateRowObject_(PDV2.SHEETS.BOT_REQUESTS, row, {
+    'Updated At': pdv2Now_(),
+    'Status': status,
+    'Result JSON': pdv2SafeJson_(processResult),
+    'Error Message': processResult.ok ? '' : processResult.error,
+    'Completed At': pdv2Now_()
+  });
+
+  pdv2Audit_('SHEET_MENU', 'BOT_REQUEST_REDO_COMPLETE', Session.getActiveUser().getEmail(), 'BotRequests', requestId, requestId, {
+    actionType: actionType,
+    status: status,
+    ok: !!processResult.ok
+  });
+
+  return pdv2Success_({
+    requestId: requestId,
+    status: status,
+    actionType: actionType,
+    result: processResult
+  });
 }
 
 function pdv2MenuClearTestRows() {

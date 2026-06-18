@@ -1063,7 +1063,10 @@ async function handleModalSubmit(interaction) {
   const message = await approvalChannel.send({ embeds: [buildLoaEmbed(loa, 'Pending', exceptionRequired)], components: [buildLoaButtons(loa.loa_id, false)] });
   await updateLoaApprovalMessage({ loaId: loa.loa_id, channelId: message.channel.id, messageId: message.id });
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: 'LOA submitted', fields: loaLogFields(loa, interaction.user.id) });
-  // TODO: Send approved LOAs to a future Google handoff integration after that feature is designed.
+  await submitDutyGoogleEvent(interaction, 'LOA_REQUEST_SUBMITTED', buildLoaGooglePayload(loa, {
+    reviewedByDiscordId: interaction.user.id,
+    loaStatus: 'pending'
+  }));
   await interaction.reply({ content: `Your LOA request has been submitted for staff approval. LOA ID: ${loa.loa_id}`, ephemeral: true });
   return true;
 }
@@ -1110,7 +1113,10 @@ async function handleButton(interaction) {
   await notifyLoaUser(interaction.client, loa, approved, roleMessage);
   await interaction.message.edit({ embeds: [buildLoaEmbed(loa, approved ? 'Approved' : 'Denied', loa.duration_days > (loaConfig.maxDaysWithoutCommandException || 60))], components: [buildLoaButtons(loa.loa_id, true)] }).catch(() => null);
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: approved ? 'LOA approved' : 'LOA denied', fields: loaLogFields(loa, interaction.user.id) });
-  // TODO: Officer management promotion/demotion/termination blocking should check active approved LOAs in a future integration.
+  await submitDutyGoogleEvent(interaction, approved ? 'LOA_APPROVED' : 'LOA_DENIED', buildLoaGooglePayload(loa, {
+    reviewedByDiscordId: interaction.user.id,
+    loaStatus: approved ? 'approved' : 'denied'
+  }));
   await interaction.editReply(`${approved ? 'Approved' : 'Denied'} ${loa.loa_id}. ${roleMessage}`);
   return true;
 }
@@ -1309,7 +1315,20 @@ async function handleCorrectionButton(interaction) {
   await notifyCorrectionUser(interaction.client, correction, approved);
   await interaction.message.edit({ embeds: [buildCorrectionEmbed(correction, approved ? 'Approved' : 'Denied')], components: [buildCorrectionButtons(correction.correction_id, true)] }).catch(() => null);
   await sendDutyLog({ guild: interaction.guild, serverConfig, title: approved ? 'Timecard correction approved' : 'Timecard correction denied', fields: correctionLogFields(correction, interaction.user.id) });
-  await submitDutyGoogleEvent(interaction, approved ? 'DUTY_TIMECARD_CORRECTION_APPROVED' : 'DUTY_TIMECARD_CORRECTION_DENIED', { correctionId, timecardId: correction.timecard_id, targetDiscordId: correction.user_id });
+  await submitDutyGoogleEvent(interaction, approved ? 'DUTY_TIMECARD_CORRECTION_APPROVED' : 'DUTY_TIMECARD_CORRECTION_DENIED', {
+    correctionId,
+    timecardId: correction.timecard_id,
+    targetDiscordId: correction.user_id,
+    originalClockInAt: toIsoString(correction.original_clock_in_at),
+    originalClockOutAt: toIsoString(correction.original_clock_out_at),
+    originalDurationMinutes: Math.round((Number(correction.original_duration_seconds) || 0) / 60),
+    requestedClockInAt: toIsoString(correction.requested_clock_in_at),
+    requestedClockOutAt: toIsoString(correction.requested_clock_out_at),
+    requestedDurationMinutes: Math.round((Number(correction.requested_duration_seconds) || 0) / 60),
+    requestedDurationHours: Math.round(((Number(correction.requested_duration_seconds) || 0) / 3600) * 100) / 100,
+    reason: correction.reason,
+    notes: correction.notes || ''
+  });
   await interaction.editReply(`${approved ? 'Approved' : 'Denied'} ${correction.correction_id}.`);
   return true;
 }
@@ -1409,6 +1428,19 @@ function loaLogFields(loa, staffUserId) {
   ];
 }
 
+function buildLoaGooglePayload(loa, extra = {}) {
+  return {
+    targetDiscordId: loa.user_id,
+    loaId: loa.loa_id,
+    startDate: formatDateOnly(loa.start_date),
+    endDate: formatDateOnly(loa.end_date),
+    durationDays: loa.duration_days,
+    reason: loa.reason,
+    comments: loa.comments || '',
+    ...extra
+  };
+}
+
 async function notifyLoaUser(client, loa, approved, roleMessage) {
   const user = await client.users.fetch(loa.user_id).catch(() => null);
   if (!user) return false;
@@ -1479,6 +1511,11 @@ function toUnix(dateValue) {
   return Math.floor(new Date(dateValue).getTime() / 1000);
 }
 
+function toIsoString(dateValue) {
+  const date = new Date(dateValue);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : '';
+}
+
 async function replyFriendlyError(interaction) {
   const errorPayload = {
     embeds: [
@@ -1503,7 +1540,7 @@ async function submitDutyGoogleEvent(interaction, actionType, payload = {}) {
     interaction,
     actor: interaction.user,
     targetDiscordId: payload.targetDiscordId || interaction.user.id,
-    targetName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
+    targetName: payload.targetName || interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
     payload: { commandName: '/duty', ...payload }
   });
 }

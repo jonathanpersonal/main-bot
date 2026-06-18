@@ -137,23 +137,268 @@ function pdv2MarkCadetTrainingPassed_(data, requestId) {
   return pdv2Success_({ discordId: discordId, cadet: saved });
 }
 
+function pdv2FormatMinutesAsHoursMinutes_(minutes) {
+  minutes = Number(minutes) || 0;
+  if (minutes <= 0) return '';
+  minutes = Math.round(minutes);
+  var hours = Math.floor(minutes / 60);
+  var remainingMinutes = minutes % 60;
+  return String(hours).padStart(2, '0') + ':' + String(remainingMinutes).padStart(2, '0');
+}
+
+function pdv2CurrentPatrolCycleKey_() {
+  return pdv2String_(pdv2GetConfigValue_('HOURS_CURRENT_CYCLE_KEY', ''));
+}
+
+function pdv2SumPatrolMinutesForCycle_(discordId, cycleKey) {
+  discordId = pdv2String_(discordId);
+  cycleKey = pdv2String_(cycleKey);
+  if (!discordId) return 0;
+
+  return pdv2ListRows_(PDV2.SHEETS.PATROL_LOGS).reduce(function(total, row) {
+    if (pdv2String_(row['Discord ID']) !== discordId) return total;
+    if (cycleKey && pdv2String_(row['Cycle Key']) !== cycleKey) return total;
+    return total + (Number(row['Duration Minutes']) || 0);
+  }, 0);
+}
+
+function pdv2ConfigList_(key, defaultValue) {
+  return pdv2String_(pdv2GetConfigValue_(key, defaultValue || ''))
+    .split(/[\n,]+/)
+    .map(function(item) { return pdv2String_(item).toLowerCase(); })
+    .filter(function(item) { return item; });
+}
+
+function pdv2ActivityConfigKeyForRank_(prefix, rank) {
+  return prefix + '_' + pdv2String_(rank)
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
+function pdv2GetActivityHoursThreshold_(prefix, rank, defaultKey, defaultValue) {
+  var rankValue = pdv2GetConfigValue_(pdv2ActivityConfigKeyForRank_(prefix, rank), '');
+  if (pdv2String_(rankValue) !== '') return Number(rankValue) || 0;
+  return Number(pdv2GetConfigValue_(defaultKey, defaultValue)) || 0;
+}
+
+function pdv2CalculateActivityStatusFromHours_(record, totalMinutes, options) {
+  options = options || {};
+  record = record || {};
+  var currentStatus = pdv2String_(record['Active Status']);
+  if (options.preserveLoa !== false && currentStatus.toLowerCase() === 'loa') return 'LOA';
+
+  var rank = pdv2String_(record.Rank || record['Rank']);
+  var rankLower = rank.toLowerCase();
+  var exemptRanks = pdv2ConfigList_('ACTIVITY_EXEMPT_RANKS', 'Chief, Deputy Chief, Commander');
+  if (exemptRanks.indexOf(rankLower) >= 0) return 'Exempt';
+
+  var newRanks = pdv2ConfigList_('ACTIVITY_NEW_RANKS', 'Recruit, Cadet');
+  if (newRanks.indexOf(rankLower) >= 0) return 'New';
+
+  var totalHours = (Number(totalMinutes) || 0) / 60;
+  var activeHours = pdv2GetActivityHoursThreshold_('ACTIVITY_ACTIVE_HOURS', rank, 'ACTIVITY_ACTIVE_HOURS_DEFAULT', '2.5');
+  var semiActiveHours = pdv2GetActivityHoursThreshold_('ACTIVITY_SEMI_ACTIVE_HOURS', rank, 'ACTIVITY_SEMI_ACTIVE_HOURS_DEFAULT', '2');
+
+  if (totalHours >= activeHours) return 'Active';
+  if (totalHours >= semiActiveHours) return 'Semi Active';
+  return 'Inactive';
+}
+
+function pdv2UpdateDatabaseCurrentCycleHoursFromPatrolLogs_(discordId, cycleKey, requestId) {
+  discordId = pdv2String_(discordId);
+  if (!discordId) return pdv2Fail_('Missing Discord ID for Database patrol-hours update.');
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
+  if (!row) return pdv2Fail_('Database record not found for patrol-hours update.', { discordId: discordId });
+
+  var totalMinutes = pdv2SumPatrolMinutesForCycle_(discordId, cycleKey);
+  var totalHhMm = pdv2FormatMinutesAsHoursMinutes_(totalMinutes) || '00:00';
+  var record = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.DATABASE), row) || {};
+  var updates = {
+    'Current Cycle Hours': totalHhMm,
+    'Latest Change': pdv2Now_()
+  };
+  if (pdv2Bool_(pdv2GetConfigValue_('ACTIVITY_STATUS_UPDATE_ON_PATROL_LOG', 'TRUE'), true)) {
+    updates['Active Status'] = pdv2CalculateActivityStatusFromHours_(record, totalMinutes);
+  }
+
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, updates);
+
+  pdv2Audit_('DISCORD_BOT', 'DATABASE_PATROL_HOURS_UPDATED', discordId, 'Database', discordId, requestId || '', {
+    cycleKey: cycleKey || '',
+    totalMinutes: totalMinutes,
+    totalHhMm: totalHhMm,
+    activeStatus: updates['Active Status'] || ''
+  });
+
+  return pdv2Success_({
+    discordId: discordId,
+    cycleKey: cycleKey || '',
+    totalMinutes: totalMinutes,
+    totalHhMm: totalHhMm,
+    activeStatus: updates['Active Status'] || '',
+    record: saved
+  });
+}
+
+function pdv2DateOnlyString_(value) {
+  if (!value) return '';
+  if (value instanceof Date) return Utilities.formatDate(value, pdv2Timezone_(), 'yyyy-MM-dd');
+  var text = pdv2String_(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  var date = new Date(text);
+  if (isNaN(date.getTime())) return text;
+  return Utilities.formatDate(date, pdv2Timezone_(), 'yyyy-MM-dd');
+}
+
+function pdv2DateOnlyComparable_(value) {
+  if (!value) return '';
+  var date = value instanceof Date ? value : new Date(value);
+  if (isNaN(date.getTime())) return pdv2String_(value);
+  return date.toISOString();
+}
+
+function pdv2IsTodayWithinDateRange_(startDate, endDate) {
+  var today = Utilities.formatDate(new Date(), pdv2Timezone_(), 'yyyy-MM-dd');
+  var start = pdv2DateOnlyString_(startDate);
+  var end = pdv2DateOnlyString_(endDate);
+  if (start && today < start) return false;
+  if (end && today > end) return false;
+  return true;
+}
+
+function pdv2UpdateDatabaseLoaStatus_(data, requestId) {
+  data = data || {};
+  var discordId = pdv2String_(pdv2Pick_(data, ['targetDiscordId', 'discordId', 'userId', 'Discord ID'], ''));
+  if (!discordId) return pdv2Fail_('Missing Discord ID for LOA status update.');
+
+  var row = pdv2FindRowByValue_(PDV2.SHEETS.DATABASE, 'Discord ID', discordId);
+  if (!row) return pdv2Fail_('Database record not found for LOA status update.', { discordId: discordId });
+
+  var actionType = pdv2Upper_(pdv2Pick_(data, ['actionType'], ''));
+  var status = pdv2String_(pdv2Pick_(data, ['loaStatus', 'status'], ''));
+  var syncAction = pdv2String_(pdv2Pick_(data, ['syncAction'], ''));
+  var startDate = pdv2Pick_(data, ['startDate', 'loaStartDate'], '');
+  var endDate = pdv2Pick_(data, ['endDate', 'loaEndDate'], '');
+  var activeNow = pdv2IsTodayWithinDateRange_(startDate, endDate);
+  var updates = { 'Latest Change': pdv2Now_() };
+
+  if (actionType === 'LOA_APPROVED' && activeNow) {
+    updates['Active Status'] = 'LOA';
+  } else if (actionType === 'LOA_SYNC_RUN' && syncAction === 'role_added') {
+    updates['Active Status'] = 'LOA';
+  } else if (actionType === 'LOA_SYNC_RUN' && syncAction === 'role_removed') {
+    var record = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.DATABASE), row) || {};
+    var cycleKey = pdv2CurrentPatrolCycleKey_();
+    var totalMinutes = pdv2SumPatrolMinutesForCycle_(discordId, cycleKey);
+    updates['Active Status'] = pdv2CalculateActivityStatusFromHours_(record, totalMinutes, { preserveLoa: false });
+  } else {
+    pdv2Audit_('DISCORD_BOT', 'DATABASE_LOA_STATUS_NO_CHANGE', discordId, 'Database', discordId, requestId || '', {
+      actionType: actionType,
+      status: status,
+      startDate: startDate,
+      endDate: endDate,
+      activeNow: activeNow
+    });
+    return pdv2Success_({ discordId: discordId, changed: false, activeNow: activeNow });
+  }
+
+  var saved = pdv2UpdateRowObject_(PDV2.SHEETS.DATABASE, row, updates);
+  pdv2Audit_('DISCORD_BOT', 'DATABASE_LOA_STATUS_UPDATED', discordId, 'Database', discordId, requestId || '', {
+    actionType: actionType,
+    status: status,
+    activeStatus: updates['Active Status'],
+    startDate: startDate,
+    endDate: endDate
+  });
+
+  return pdv2Success_({
+    discordId: discordId,
+    changed: true,
+    activeStatus: updates['Active Status'],
+    record: saved
+  });
+}
+
+function pdv2ApplyTimecardCorrectionToPatrolLog_(data, requestId) {
+  data = data || {};
+  var timecardId = pdv2String_(pdv2Pick_(data, ['timecardId', 'timecard_id', 'Timecard ID'], ''));
+  var discordId = pdv2String_(pdv2Pick_(data, ['targetDiscordId', 'discordId', 'userId', 'Discord ID'], ''));
+  if (!discordId) return pdv2Fail_('Missing Discord ID for timecard correction.');
+
+  var requestedMinutes = Number(pdv2Pick_(data, ['requestedDurationMinutes', 'durationMinutes'], 0)) || 0;
+  var requestedHours = pdv2Pick_(data, ['requestedDurationHours', 'durationHours'], requestedMinutes ? Math.round((requestedMinutes / 60) * 100) / 100 : '');
+  var requestedHhMm = pdv2Pick_(data, ['requestedDurationHhMm', 'durationHhMm'], '') || pdv2FormatMinutesAsHoursMinutes_(requestedMinutes);
+  var row = timecardId ? pdv2FindRowByValue_(PDV2.SHEETS.PATROL_LOGS, 'Timecard ID', timecardId) : 0;
+  var patrolLogUpdated = false;
+  var cycleKey = pdv2Pick_(data, ['cycleKey'], pdv2CurrentPatrolCycleKey_());
+
+  if (!row) {
+    var originalStart = pdv2DateOnlyComparable_(pdv2Pick_(data, ['originalClockInAt'], ''));
+    var originalEnd = pdv2DateOnlyComparable_(pdv2Pick_(data, ['originalClockOutAt'], ''));
+    var rows = pdv2ListRows_(PDV2.SHEETS.PATROL_LOGS);
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (pdv2String_(rows[i]['Discord ID']) !== discordId) continue;
+      if (originalStart && pdv2DateOnlyComparable_(rows[i]['Started At']) !== originalStart) continue;
+      if (originalEnd && pdv2DateOnlyComparable_(rows[i]['Ended At']) !== originalEnd) continue;
+      row = rows[i].__rowNumber;
+      break;
+    }
+  }
+
+  if (row) {
+    var patrolRecord = pdv2RowToObject_(pdv2EnsureSheet_(PDV2.SHEETS.PATROL_LOGS), row) || {};
+    cycleKey = pdv2Pick_(patrolRecord, ['Cycle Key'], cycleKey);
+    pdv2UpdateRowObject_(PDV2.SHEETS.PATROL_LOGS, row, {
+      'Started At': pdv2Pick_(data, ['requestedClockInAt', 'startedAt'], patrolRecord['Started At']),
+      'Ended At': pdv2Pick_(data, ['requestedClockOutAt', 'endedAt'], patrolRecord['Ended At']),
+      'Duration Minutes': requestedMinutes || patrolRecord['Duration Minutes'],
+      'Duration Hours': requestedHours || patrolRecord['Duration Hours'],
+      'Duration HH:MM': requestedHhMm || patrolRecord['Duration HH:MM'],
+      'Notes': pdv2Pick_(data, ['reason', 'notes'], patrolRecord.Notes),
+      'Updated At': pdv2Now_()
+    });
+    patrolLogUpdated = true;
+  }
+
+  var databaseHoursResult = pdv2UpdateDatabaseCurrentCycleHoursFromPatrolLogs_(discordId, cycleKey, requestId);
+  pdv2Audit_('DISCORD_BOT', 'TIMECARD_CORRECTION_APPLIED', discordId, 'PatrolLogs', timecardId || '', requestId || '', {
+    timecardId: timecardId,
+    patrolLogUpdated: patrolLogUpdated,
+    requestedMinutes: requestedMinutes,
+    requestedHhMm: requestedHhMm
+  });
+
+  return pdv2Success_({
+    timecardId: timecardId,
+    patrolLogUpdated: patrolLogUpdated,
+    databaseHours: databaseHoursResult
+  });
+}
+
 function pdv2AppendPatrolLog_(data, requestId) {
   data = data || {};
   var patrolLogId = pdv2GenerateId_('PATROL');
+  var discordId = pdv2Pick_(data, ['targetDiscordId', 'discordId'], '');
   var minutes = Number(pdv2Pick_(data, ['durationMinutes'], 0)) || 0;
   var hours = pdv2Pick_(data, ['durationHours'], minutes ? Math.round((minutes / 60) * 100) / 100 : '');
+  var durationHhMm = pdv2Pick_(data, ['durationHhMm', 'durationHHMM', 'Duration HH:MM'], '') || pdv2FormatMinutesAsHoursMinutes_(minutes);
+  var cycleKey = pdv2Pick_(data, ['cycleKey'], pdv2CurrentPatrolCycleKey_());
   pdv2AppendObject_(PDV2.SHEETS.PATROL_LOGS, {
     'PatrolLogId': patrolLogId,
-    'Discord ID': pdv2Pick_(data, ['targetDiscordId', 'discordId'], ''),
+    'Discord ID': discordId,
     'Name': pdv2Pick_(data, ['targetName', 'name'], ''),
     'Rank': pdv2Pick_(data, ['rank'], ''),
     'Department': pdv2Pick_(data, ['department', 'departmentKey'], pdv2GetConfigValue_('DEFAULT_DEPARTMENT_KEY', 'main')),
     'Patrol Type': pdv2Pick_(data, ['patrolType', 'type'], 'Duty'),
+    'Timecard ID': pdv2Pick_(data, ['timecardId', 'timecard_id', 'Timecard ID'], ''),
     'Started At': pdv2Pick_(data, ['startedAt'], ''),
     'Ended At': pdv2Pick_(data, ['endedAt'], ''),
     'Duration Minutes': minutes || '',
     'Duration Hours': hours,
-    'Cycle Key': pdv2Pick_(data, ['cycleKey'], pdv2GetConfigValue_('HOURS_CURRENT_CYCLE_KEY', '')),
+    'Duration HH:MM': durationHhMm,
+    'Cycle Key': cycleKey,
     'Logged By Discord ID': pdv2Pick_(data, ['submittedByDiscordId', 'loggedByDiscordId'], ''),
     'Source': pdv2Pick_(data, ['source'], 'DISCORD_BOT'),
     'Request ID': requestId || '',
@@ -161,8 +406,16 @@ function pdv2AppendPatrolLog_(data, requestId) {
     'Created At': pdv2Now_(),
     'Updated At': pdv2Now_()
   });
+  var databaseHoursResult = minutes > 0
+    ? pdv2UpdateDatabaseCurrentCycleHoursFromPatrolLogs_(discordId, cycleKey, requestId)
+    : null;
   pdv2Audit_('DISCORD_BOT', 'PATROL_LOG_CREATED', pdv2Pick_(data, ['submittedByDiscordId'], ''), 'PatrolLogs', patrolLogId, requestId || '', {});
-  return pdv2Success_({ patrolLogId: patrolLogId, hoursMode: pdv2GetConfigValue_('HOURS_MODE', 'FORMULA') });
+  return pdv2Success_({
+    patrolLogId: patrolLogId,
+    durationHhMm: durationHhMm,
+    databaseHours: databaseHoursResult,
+    hoursMode: pdv2GetConfigValue_('HOURS_MODE', 'FORMULA')
+  });
 }
 
 function pdv2ActivityNoticeDiscordId_(data) {

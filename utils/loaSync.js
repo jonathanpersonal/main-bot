@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const serverConfig = require('../config/serverConfig');
 const { sendDutyLog } = require('./logUtils');
+const { safeSubmitDepartmentEvent } = require('./googleDepartmentEvents');
 const {
   ensureDutyTables,
   getApprovedLoasForSync,
@@ -65,6 +66,7 @@ async function runLoaDailySync(client, options = {}) {
             summary.added += 1;
             addDetail(summary, loa, 'added', `Added LOA role to <@${loa.user_id}>.`);
             await sendDutyLog({ guild, serverConfig, title: 'LOA role added by daily sync', fields: basicFields(loa, triggeredBy, dryRun) });
+            await submitLoaSyncGoogleEvent({ loa, guild, member, triggeredBy, syncAction: 'role_added' });
           }
         } else if (!shouldHaveRole && hasRole) {
           if (dryRun) {
@@ -77,6 +79,7 @@ async function runLoaDailySync(client, options = {}) {
             summary.removed += 1;
             addDetail(summary, loa, 'removed', `Removed LOA role from <@${loa.user_id}>.`);
             await sendDutyLog({ guild, serverConfig, title: 'LOA role removed by daily sync', fields: basicFields(loa, triggeredBy, dryRun) });
+            await submitLoaSyncGoogleEvent({ loa, guild, member, triggeredBy, syncAction: 'role_removed' });
           }
         } else {
           summary.alreadyCorrect += 1;
@@ -115,6 +118,26 @@ function startLoaDailySyncScheduler(client) {
   cron.schedule(`${Number(minute) || 0} ${Number(hour) || 9} * * *`, () => {
     runLoaDailySync(client, { dryRun: false, triggeredBy: 'scheduled' }).catch((error) => console.error('Scheduled LOA sync failed:', error));
   }, { timezone: syncConfig.timezone || 'America/New_York' });
+}
+
+async function submitLoaSyncGoogleEvent({ loa, guild, member, triggeredBy, syncAction }) {
+  return safeSubmitDepartmentEvent({
+    actionType: 'LOA_SYNC_RUN',
+    guildId: guild?.id || loa.guild_id,
+    commandName: 'LOA_SYNC_RUN',
+    submittedByDiscordId: String(triggeredBy || 'system'),
+    targetDiscordId: loa.user_id,
+    targetName: member?.displayName || member?.user?.username || null,
+    payload: {
+      loaId: loa.loa_id,
+      syncAction,
+      loaStatus: loa.status || 'approved',
+      startDate: formatDateOnly(loa.start_date),
+      endDate: formatDateOnly(loa.end_date),
+      durationDays: loa.duration_days,
+      triggeredBy: String(triggeredBy || 'system')
+    }
+  });
 }
 
 async function sendSyncSummaryLog(client, guildId, summary, triggeredBy) {
