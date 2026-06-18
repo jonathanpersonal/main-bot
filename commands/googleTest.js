@@ -7,6 +7,15 @@ const {
   markBotActionComplete
 } = require('../utils/googleWebhook');
 
+const SIMPLE_RESULT_ACTION_TYPES = new Set([
+  'REGISTER_OFFICER_RESULT',
+  'OFFICER_MANAGEMENT_RESULT',
+  'OFFICER_STATUS_RESULT',
+  'DISCIPLINE_RECORD_RESULT',
+  'TRAINING_RECORD_RESULT',
+  'GENERIC_REQUEST_RECEIVED'
+]);
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('google-test')
@@ -19,7 +28,9 @@ module.exports = {
         .addChoices(
           { name: 'Ping Google only', value: 'ping' },
           { name: 'Submit test request', value: 'submit' },
-          { name: 'Poll pending bot actions', value: 'poll' }
+          { name: 'Poll pending bot actions', value: 'poll' },
+          { name: 'Complete GOOGLE_TEST_RESULT actions', value: 'complete-test-actions' },
+          { name: 'Complete simple result actions', value: 'complete-result-actions' }
         )
     ),
 
@@ -52,28 +63,48 @@ module.exports = {
       }
 
       if (mode === 'poll') {
-        const result = await getPendingBotActions({
-          guildId: interaction.guildId,
-          limit: 5
-        });
-
+        const result = await getPendingBotActions({ guildId: interaction.guildId, limit: 5 });
         const actions = result.actions || [];
-
-        for (const action of actions) {
-          await markBotActionComplete(action.actionId, {
-            handledBy: interaction.user.id,
-            handledByCommand: '/google-test poll',
-            note: 'Test command marked this action complete.'
-          });
-        }
 
         return interaction.editReply({
           content: [
             '✅ Google poll succeeded.',
             `Pending action(s) returned: ${actions.length}`,
             actions.length
-              ? actions.map((action) => `- ${action.actionType} / ${action.actionId}`).join('\n')
-              : 'No pending actions found.'
+              ? actions.map((action) => `- ${action.actionType || action.type} / ${action.actionId || action.id}`).join('\n')
+              : 'No pending actions found.',
+            '',
+            'No actions were completed and no test requests were created.'
+          ].join('\n')
+        });
+      }
+
+      if (mode === 'complete-test-actions' || mode === 'complete-result-actions') {
+        const allowedTypes = mode === 'complete-test-actions'
+          ? new Set(['GOOGLE_TEST_RESULT'])
+          : SIMPLE_RESULT_ACTION_TYPES;
+        const result = await getPendingBotActions({ guildId: interaction.guildId, limit: 25 });
+        const actions = (result.actions || []).filter((action) => allowedTypes.has(action.actionType || action.type));
+
+        for (const action of actions) {
+          await markBotActionComplete(action.actionId || action.id, {
+            handledBy: interaction.user.id,
+            handledByCommand: `/google-test ${mode}`,
+            note: 'Test command completed this pending result action.',
+            handledAt: new Date().toISOString()
+          });
+        }
+
+        return interaction.editReply({
+          content: [
+            '✅ Google completion succeeded.',
+            `Mode: ${mode}`,
+            `Completed action(s): ${actions.length}`,
+            actions.length
+              ? actions.map((action) => `- ${action.actionType || action.type} / ${action.actionId || action.id}`).join('\n')
+              : 'No matching pending actions found.',
+            '',
+            'No test requests were created.'
           ].join('\n')
         });
       }
@@ -100,19 +131,13 @@ module.exports = {
           `Request ID: ${result.requestId}`,
           `Status: ${result.status}`,
           '',
-          'Now check the Google Sheet tabs:',
-          '- `BotRequests` should have the request.',
-          '- `BotActions` should have a pending `LOG_MESSAGE` action.',
-          '',
-          'Then run `/google-test mode: Poll pending bot actions` to prove the bot can read and complete pending actions.'
+          'Now check `BotRequests` and `BotActions`, then use poll or complete modes without creating duplicate test requests.'
         ].join('\n')
       });
     } catch (error) {
       console.error('Google test failed:', error);
 
-      return interaction.editReply({
-        content: `❌ Google test failed: ${error.message}`
-      });
+      return interaction.editReply({ content: `❌ Google test failed: ${error.message}` });
     }
   }
 };

@@ -7,7 +7,8 @@ const {
 } = require('discord.js');
 const { getServerConfig } = require('../utils/configUtils');
 const { getMemberRank } = require('../utils/rankUtils');
-const { getGoogleConfig, submitBotRequest } = require('../utils/googleWebhook');
+const { getGoogleConfig } = require('../utils/googleWebhook');
+const { submitRegistrationEvent } = require('../utils/googleDepartmentEvents');
 const {
   buildRegistrationPayload,
   canRegisterOther,
@@ -184,7 +185,21 @@ module.exports = {
         emailRequired,
         departmentKey: googleConfig.departmentKey
       });
-      const result = await submitBotRequest(payload);
+      const result = await submitRegistrationEvent({
+        interaction,
+        target: targetMember,
+        targetDiscordId: targetMember.id,
+        targetDiscordTag: targetMember.user.tag,
+        targetName: cleanName,
+        newRank: getRankName(detectedRank),
+        payload: payload.payload,
+        departmentKey: googleConfig.departmentKey,
+        requestFields: {
+          discordUserId: targetMember.id,
+          discordId: targetMember.id,
+          upsertByDiscordId: true
+        }
+      });
 
       await interaction.editReply({
         content: [
