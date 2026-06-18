@@ -4,7 +4,7 @@
  * -----------------------------------------------------------
  * Purpose:
  *   Rebuild/sync CallsignRegistry assignment state from the
- *   main Database roster sheet.
+ *   configured external roster spreadsheet.
  *************************************************************/
 
 function pdv2NormalizeCallsign_(value) {
@@ -12,6 +12,10 @@ function pdv2NormalizeCallsign_(value) {
 }
 
 function pdv2GetCallsignFromDatabaseRecord_(record) {
+  return pdv2NormalizeCallsign_(record && record['Current Callsign']);
+}
+
+function pdv2GetCallsignFromRosterRecord_(record) {
   return pdv2NormalizeCallsign_(record && record['Current Callsign']);
 }
 
@@ -37,6 +41,56 @@ function pdv2RegistryUpdates_(row, updates) {
   return out;
 }
 
+function pdv2RosterSyncLog_(runId, event, message, meta) {
+  pdv2Log_('INFO', runId, event, message, meta || {});
+  try { SpreadsheetApp.flush(); } catch (err) {}
+}
+
+function pdv2RegistryRowForHeaders_(headers, obj) {
+  return headers.map(function(header) {
+    return obj && obj.hasOwnProperty(header) ? obj[header] : '';
+  });
+}
+
+function pdv2MergeRegistryRow_(existing, updates) {
+  var merged = {};
+  Object.keys(existing || {}).forEach(function(key) {
+    if (key.indexOf('__') !== 0) merged[key] = existing[key];
+  });
+  Object.keys(updates || {}).forEach(function(key) {
+    if (key.indexOf('__') !== 0) merged[key] = updates[key];
+  });
+  return merged;
+}
+
+function pdv2ApplyCallsignRegistryChanges_(adds, updates, runId, preview) {
+  if (preview) return;
+  if (!adds.length && !updates.length) return;
+
+  var sh = pdv2EnsureSheet_(PDV2.SHEETS.CALLSIGN_REGISTRY);
+  var map = pdv2HeaderMap_(sh);
+  var headers = Object.keys(map).sort(function(a, b) { return map[a] - map[b]; });
+
+  if (adds.length) {
+    var startRow = sh.getLastRow() + 1;
+    var addValues = adds.map(function(obj) { return pdv2RegistryRowForHeaders_(headers, obj); });
+    sh.getRange(startRow, 1, addValues.length, headers.length).setValues(addValues);
+    pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_APPEND_COMPLETE', 'Added CallsignRegistry rows.', { rows: adds.length });
+  }
+
+  updates.forEach(function(item, index) {
+    var merged = pdv2MergeRegistryRow_(item.existing, item.updates);
+    sh.getRange(item.rowNumber, 1, 1, headers.length).setValues([pdv2RegistryRowForHeaders_(headers, merged)]);
+    if ((index + 1) % 50 === 0) {
+      pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_UPDATE_PROGRESS', 'Updated CallsignRegistry rows.', { completed: index + 1, total: updates.length });
+    }
+  });
+
+  if (updates.length) {
+    pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_UPDATE_COMPLETE', 'Updated CallsignRegistry rows.', { rows: updates.length });
+  }
+}
+
 function pdv2PreviewCallsignRegistrySync_() {
   return pdv2SyncCallsignRegistryFromDatabase_({ preview: true });
 }
@@ -49,18 +103,32 @@ function pdv2SyncCallsignRegistryFromDatabase_(options) {
   options = options || {};
   var preview = options.preview === true;
   var allowOverwrite = options.allowOverwrite === true || options.repairMode === true;
+  var runId = pdv2GenerateId_(preview ? 'ROSTER-PREVIEW' : 'ROSTER-SYNC');
   var summary = {
-    scannedDatabaseRows: 0,
-    assignedFromDatabase: 0,
+    runId: runId,
+    preview: preview,
+    rosterSpreadsheetConfigured: !!pdv2GetConfigValue_('ROSTER_SPREADSHEET_ID', ''),
+    rosterSheetNames: pdv2ConfiguredRosterSheetNames_(),
+    scannedRosterRows: 0,
+    assignedFromRoster: 0,
+    availableFromRoster: 0,
     alreadyMatched: 0,
     addedToRegistry: 0,
     updatedRegistryRows: 0,
+    releasedRegistryRows: 0,
     duplicateCallsigns: [],
     inactiveAssignments: [],
     warnings: []
   };
 
+  pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_START', preview ? 'Previewing callsign roster sync.' : 'Starting callsign roster sync.', {
+    preview: preview,
+    rosterSheetNames: summary.rosterSheetNames
+  });
+
   var registryRows = pdv2ListRows_(PDV2.SHEETS.CALLSIGN_REGISTRY);
+  pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_REGISTRY_LOADED', 'Loaded CallsignRegistry rows.', { rows: registryRows.length });
+
   var registryByCallsign = {};
   registryRows.forEach(function(row) {
     var key = pdv2NormalizeCallsign_(row['Callsign']);
@@ -68,38 +136,89 @@ function pdv2SyncCallsignRegistryFromDatabase_(options) {
   });
 
   var seen = {};
-  var dbRows = pdv2ListRows_(PDV2.SHEETS.DATABASE);
-  dbRows.forEach(function(record) {
+  var rosterCallsigns = {};
+  var rosterRows = pdv2ListRosterRows_(runId);
+  pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_ROSTER_LOADED', 'Loaded external roster rows.', { rows: rosterRows.length, sheetNames: summary.rosterSheetNames });
+
+  var registryAdds = [];
+  var registryUpdates = [];
+
+  rosterRows.forEach(function(record) {
     if ([record['Discord ID'], record['Name'], record['Username'], record['Rank'], record['Status'], record['Department'], record['Current Callsign']].join('').trim() === '') return;
-    summary.scannedDatabaseRows++;
-    var callsign = pdv2GetCallsignFromDatabaseRecord_(record);
+    summary.scannedRosterRows++;
+    var callsign = pdv2GetCallsignFromRosterRecord_(record);
     if (!callsign) return;
+    rosterCallsigns[callsign] = true;
 
     var discordId = pdv2String_(record['Discord ID']);
-    var rosterInfo = { callsign: callsign, discordId: discordId, name: record['Name'], username: record['Username'], rank: record['Rank'], department: record['Department'], rowNumber: record.__rowNumber };
+    var hasOfficer = !!(discordId || pdv2String_(record['Name']) || pdv2String_(record['Username']));
+    var registry = registryByCallsign[callsign];
+
+    if (!hasOfficer) {
+      summary.availableFromRoster++;
+      if (!registry) {
+        summary.addedToRegistry++;
+        registryAdds.push({
+          'Slot ID': pdv2GenerateId_('SLOT'), 'Callsign': callsign, 'Status': 'AVAILABLE', 'Slot Status': 'AVAILABLE',
+          'Assigned Discord ID': '', 'Assigned Name': '', 'Assigned Username': '', 'Assigned Rank': '',
+          'Rank': record['Rank'], 'Department': record['Department'],
+          'Assigned At': '', 'Assigned Date': '', 'Assigned By': '', 'Request ID': '',
+          'Source': 'Roster', 'Released Date': '', 'Notes': 'Available slot synced from external roster.',
+          'Updated At': pdv2Now_(), 'Last Updated': pdv2Now_()
+        });
+        registryByCallsign[callsign] = { Callsign: callsign, Status: 'AVAILABLE', Rank: record['Rank'], Source: 'Roster' };
+        return;
+      }
+
+      var availableStatus = pdv2RegistryStatus_(registry);
+      if (availableStatus !== 'AVAILABLE' || pdv2String_(registry['Rank']) !== pdv2String_(record['Rank'])) {
+        summary.updatedRegistryRows++;
+        registryUpdates.push({ rowNumber: registry.__rowNumber, existing: registry, updates: pdv2RegistryUpdates_(registry, {
+          Status: 'AVAILABLE',
+          'Assigned Discord ID': '',
+          'Assigned Name': '',
+          'Assigned Username': '',
+          'Assigned Rank': '',
+          'Assigned Date': '',
+          'Assigned At': '',
+          'Assigned By': '',
+          'Request ID': '',
+          Rank: record['Rank'],
+          Department: record['Department'],
+          Source: 'Roster',
+          'Released Date': pdv2Now_(),
+          Notes: 'Available slot synced from external roster.'
+        }) });
+      } else {
+        summary.alreadyMatched++;
+      }
+      return;
+    }
+
+    var rosterInfo = { callsign: callsign, discordId: discordId, name: record['Name'], username: record['Username'], rank: record['Rank'], department: record['Department'], sheetName: record.__sheetName, rowNumber: record.__rowNumber };
     if (!pdv2IsActiveDatabaseOfficer_(record)) summary.inactiveAssignments.push(rosterInfo);
     if (seen[callsign] && seen[callsign] !== discordId) summary.duplicateCallsigns.push({ callsign: callsign, discordIds: [seen[callsign], discordId] });
     seen[callsign] = discordId;
-    summary.assignedFromDatabase++;
+    summary.assignedFromRoster++;
 
-    var registry = registryByCallsign[callsign];
     if (!registry) {
       summary.addedToRegistry++;
-      if (!preview) pdv2AppendObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, {
+      registryAdds.push({
         'Slot ID': pdv2GenerateId_('SLOT'), 'Callsign': callsign, 'Status': 'ASSIGNED', 'Slot Status': 'ASSIGNED',
         'Assigned Discord ID': discordId, 'Assigned Name': record['Name'], 'Assigned Username': record['Username'],
         'Assigned Rank': record['Rank'], 'Rank': record['Rank'], 'Department': record['Department'],
         'Assigned At': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()), 'Assigned Date': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()),
-        'Assigned By': 'DATABASE_SYNC', 'Request ID': '', 'Source': 'Database', 'Notes': 'Synced from Database roster.', 'Updated At': pdv2Now_(), 'Last Updated': pdv2Now_()
+        'Assigned By': 'ROSTER_SYNC', 'Request ID': '', 'Source': 'Roster', 'Notes': 'Synced from external roster.', 'Updated At': pdv2Now_(), 'Last Updated': pdv2Now_()
       });
+      registryByCallsign[callsign] = { Callsign: callsign, Status: 'ASSIGNED', 'Assigned Discord ID': discordId, Source: 'Roster' };
       return;
     }
 
     var assignedId = pdv2String_(registry['Assigned Discord ID']);
     var status = pdv2RegistryStatus_(registry);
     if (assignedId && assignedId !== discordId) {
-      summary.warnings.push('Callsign ' + callsign + ' is assigned to ' + assignedId + ' in registry but ' + discordId + ' in Database.');
-      if (!preview && allowOverwrite) pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, registry.__rowNumber, pdv2RegistryUpdates_(registry, { Status: 'CONFLICT', Notes: 'Conflict detected during Database sync.' }));
+      summary.warnings.push('Callsign ' + callsign + ' is assigned to ' + assignedId + ' in registry but ' + discordId + ' in external roster.');
+      if (allowOverwrite) registryUpdates.push({ rowNumber: registry.__rowNumber, existing: registry, updates: pdv2RegistryUpdates_(registry, { Status: 'CONFLICT', Notes: 'Conflict detected during roster sync.' }) });
       return;
     }
 
@@ -107,15 +226,53 @@ function pdv2SyncCallsignRegistryFromDatabase_(options) {
       summary.alreadyMatched++;
     } else {
       summary.updatedRegistryRows++;
-      if (!preview) pdv2UpdateRowObject_(PDV2.SHEETS.CALLSIGN_REGISTRY, registry.__rowNumber, pdv2RegistryUpdates_(registry, {
+      registryUpdates.push({ rowNumber: registry.__rowNumber, existing: registry, updates: pdv2RegistryUpdates_(registry, {
         Status: 'ASSIGNED', 'Assigned Discord ID': discordId, 'Assigned Name': record['Name'], 'Assigned Username': record['Username'],
         'Assigned Rank': record['Rank'], Rank: record['Rank'], Department: record['Department'], 'Assigned At': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()),
-        'Assigned Date': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()), 'Assigned By': 'DATABASE_SYNC', Source: 'Database', Notes: 'Synced from Database roster.'
-      }));
+        'Assigned Date': pdv2Pick_(record, ['Callsign Updated'], pdv2Now_()), 'Assigned By': 'ROSTER_SYNC', Source: 'Roster', Notes: 'Synced from external roster.'
+      }) });
     }
   });
 
+  registryRows.forEach(function(registry) {
+    var callsign = pdv2NormalizeCallsign_(registry['Callsign']);
+    if (!callsign || rosterCallsigns[callsign]) return;
+
+    var status = pdv2RegistryStatus_(registry);
+    var source = pdv2Upper_(pdv2Pick_(registry, ['Source', 'Assigned By'], ''));
+    var rosterManaged = source === 'ROSTER' || source === 'ROSTER_SYNC' || source === 'DATABASE' || source === 'DATABASE_SYNC';
+    if (status !== 'ASSIGNED' || !rosterManaged) return;
+
+    summary.releasedRegistryRows++;
+    registryUpdates.push({ rowNumber: registry.__rowNumber, existing: registry, updates: pdv2RegistryUpdates_(registry, {
+      Status: 'AVAILABLE',
+      'Assigned Discord ID': '',
+      'Assigned Name': '',
+      'Assigned Username': '',
+      'Assigned Rank': '',
+      'Assigned Date': '',
+      'Assigned At': '',
+      'Assigned By': '',
+      'Request ID': '',
+      Source: 'Roster',
+      'Released Date': pdv2Now_(),
+      Notes: 'Released because the callsign is not occupied in the external roster.'
+    }) });
+  });
+
+  pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_CHANGES_PLANNED', 'Finished comparing roster to registry.', {
+    scannedRosterRows: summary.scannedRosterRows,
+    assignedFromRoster: summary.assignedFromRoster,
+    availableFromRoster: summary.availableFromRoster,
+    adds: registryAdds.length,
+    updates: registryUpdates.length,
+    warnings: summary.warnings.length
+  });
+
+  pdv2ApplyCallsignRegistryChanges_(registryAdds, registryUpdates, runId, preview);
+
   pdv2Audit_('SHEET_MENU', preview ? 'CALLSIGN_REGISTRY_SYNC_PREVIEW' : 'CALLSIGN_REGISTRY_SYNC', '', 'CallsignRegistry', '', '', summary);
+  pdv2RosterSyncLog_(runId, 'ROSTER_SYNC_COMPLETE', preview ? 'Callsign roster sync preview complete.' : 'Callsign roster sync complete.', summary);
   return pdv2Success_(summary);
 }
 

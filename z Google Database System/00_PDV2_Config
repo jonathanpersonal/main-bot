@@ -25,7 +25,10 @@ var PDV2 = {
     DEFAULT_DEPARTMENT_KEY: 'main',
     TIMEZONE: 'America/New_York',
     BOT_API_ENABLED: 'TRUE',
-    UI_BACKEND_ENABLED: 'TRUE'
+    UI_BACKEND_ENABLED: 'TRUE',
+    ROSTER_SPREADSHEET_ID: '',
+    ROSTER_MAIN_SHEET_NAME: 'Main Roster',
+    ROSTER_PROBATIONARY_SHEET_NAME: 'Probationary Roster'
   },
 
   SHEETS: {

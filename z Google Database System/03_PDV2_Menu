@@ -20,7 +20,8 @@ function onOpen() {
     .addSeparator()
     .addSubMenu(ui.createMenu('Callsigns')
       .addItem('Preview Callsign Registry Sync', 'pdv2MenuPreviewCallsignRegistrySync')
-      .addItem('Sync Registry From Database', 'pdv2MenuSyncCallsignRegistryFromDatabase')
+      .addItem('Sync Registry From Roster', 'pdv2MenuSyncCallsignRegistryFromDatabase')
+      .addItem('Diagnose Roster Columns', 'pdv2MenuDiagnoseRosterColumns')
       .addItem('View Callsign Registry Summary', 'pdv2MenuViewCallsignRegistrySummary')
       .addItem('Seed Demo Callsign Slots', 'pdv2MenuSeedDemoCallsignSlots'))
     .addSeparator()
@@ -95,10 +96,18 @@ function pdv2MenuPreviewCallsignRegistrySync() {
 
 function pdv2MenuSyncCallsignRegistryFromDatabase() {
   var ui = SpreadsheetApp.getUi();
-  var response = ui.alert('Sync Registry From Database', 'This updates/adds CallsignRegistry assignment rows from active Database roster callsigns. Continue?', ui.ButtonSet.YES_NO);
+  var response = ui.alert('Sync Registry From Roster', 'This updates CallsignRegistry from the configured external roster spreadsheet and releases roster-managed callsigns that are no longer occupied. Continue?', ui.ButtonSet.YES_NO);
   if (response !== ui.Button.YES) return;
   var result = pdv2SyncCallsignRegistryFromDatabase_();
   ui.alert('Callsign registry sync complete:\n\n' + JSON.stringify(result, null, 2));
+}
+
+function pdv2MenuDiagnoseRosterColumns() {
+  var result = pdv2DiagnoseRosterColumns_();
+  SpreadsheetApp.getUi().alert(
+    'Roster diagnostics written to ScriptLogs.\n\nRun ID:\n' + result.runId +
+    '\n\nCopy the ROSTER_DIAG_COMPLETE Meta JSON row back to Codex.'
+  );
 }
 
 function pdv2MenuViewCallsignRegistrySummary() {
