@@ -63,6 +63,12 @@ async function safeSubmitDepartmentEvent(options = {}) {
     return await submitDepartmentEvent(options);
   } catch (error) {
     console.warn(`Google department event failed for ${options.actionType || 'unknown action'}:`, error);
+    if (error?.isGoogleTimeout) {
+      return { ok: false, pending: true, error };
+    }
+    if (/Lock timeout/i.test(error?.message || '')) {
+      return { ok: false, busy: true, error };
+    }
     return { ok: false, error };
   }
 }

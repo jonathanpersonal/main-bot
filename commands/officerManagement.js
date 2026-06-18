@@ -932,6 +932,18 @@ async function confirmRankChange({
 
 function buildGoogleSubmissionStatus(googleResult) {
   if (googleResult?.ok === false) {
+    if (googleResult.pending) {
+      return [
+        '⚠️ Discord roles were changed, but Google did not respond before the bot timeout.',
+        'Do not run the command again until you check `BotRequests`/`BotActions`; Google may still finish this request.'
+      ].join('\n');
+    }
+    if (googleResult.busy) {
+      return [
+        '⚠️ Discord roles were changed, but Google was busy processing another request.',
+        'Check `BotRequests`; if no row was created for this action, retry Google logging only after the current Google request finishes.'
+      ].join('\n');
+    }
     return `⚠️ Discord roles were changed, but Google logging failed: ${googleResult.error.message}`;
   }
 
@@ -1336,6 +1348,18 @@ function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResul
 
 function buildOfficerActionGoogleStatus(googleResult) {
   if (googleResult?.ok === false) {
+    if (googleResult.pending) {
+      return [
+        '⚠️ Discord action completed, but Google did not respond before the bot timeout.',
+        'Do not run the command again until you check `BotRequests`/`BotActions`; Google may still finish this request.'
+      ].join('\n');
+    }
+    if (googleResult.busy) {
+      return [
+        '⚠️ Discord action completed, but Google was busy processing another request.',
+        'Check `BotRequests`; if no row was created for this action, retry Google logging only after the current Google request finishes.'
+      ].join('\n');
+    }
     return `⚠️ Discord action completed, but Google logging failed: ${googleResult.error.message}`;
   }
 

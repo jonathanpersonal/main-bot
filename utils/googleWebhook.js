@@ -18,6 +18,14 @@ function getGoogleConfig() {
   };
 }
 
+class GoogleTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'GoogleTimeoutError';
+    this.isGoogleTimeout = true;
+  }
+}
+
 async function postToGoogle(route, data = {}) {
   const config = getGoogleConfig();
 
@@ -64,7 +72,7 @@ async function postToGoogle(route, data = {}) {
     return json;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error(
+      throw new GoogleTimeoutError(
         `Google Apps Script did not respond within ${Math.round(config.timeoutMs / 1000)} seconds. ` +
           'The request may still have completed in Google, so check BotRequests/BotActions before trying again.'
       );
@@ -100,6 +108,7 @@ async function markBotActionFailed(actionId, errorMessage, result = {}) {
 }
 
 module.exports = {
+  GoogleTimeoutError,
   getGoogleConfig,
   postToGoogle,
   submitBotRequest,

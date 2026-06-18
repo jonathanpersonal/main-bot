@@ -128,63 +128,65 @@ function pdv2RegisterOfficerFromBotRequest_(requestId, data) {
 }
 
 function pdv2SubmitBotRequest_(data) {
-  return pdv2WithLock_(function() {
-    data = data || {};
-    var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
-    var actionType = pdv2Upper_(
-      pdv2Pick_(data, ['actionType', 'action', 'type'], '') ||
-      pdv2Pick_(payload, ['actionType', 'action', 'type'], '') ||
-      'GOOGLE_TEST'
-    );
-    var requestId = pdv2GenerateId_('REQ');
-    var actor = pdv2String_(pdv2Pick_(data, ['submittedByDiscordId', 'actorDiscordId', 'actor', 'userId']));
-    var targetDiscordId = pdv2String_(
-      pdv2Pick_(data, ['targetDiscordId', 'discordId', 'discordUserId', 'targetId'], '') ||
-      pdv2Pick_(payload, ['targetDiscordId', 'discordId', 'discordUserId', 'targetId'], '')
-    );
-    var targetName = pdv2String_(
-      pdv2Pick_(data, ['targetName', 'name', 'displayName'], '') ||
-      pdv2Pick_(payload, ['targetName', 'cleanDisplayName', 'name', 'displayName'], '')
-    );
-    var storedPayload = data.payload && typeof data.payload === 'object' ? data.payload : data;
+  data = data || {};
+  var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+  var actionType = pdv2Upper_(
+    pdv2Pick_(data, ['actionType', 'action', 'type'], '') ||
+    pdv2Pick_(payload, ['actionType', 'action', 'type'], '') ||
+    'GOOGLE_TEST'
+  );
+  var requestId = pdv2GenerateId_('REQ');
+  var actor = pdv2String_(pdv2Pick_(data, ['submittedByDiscordId', 'actorDiscordId', 'actor', 'userId']));
+  var targetDiscordId = pdv2String_(
+    pdv2Pick_(data, ['targetDiscordId', 'discordId', 'discordUserId', 'targetId'], '') ||
+    pdv2Pick_(payload, ['targetDiscordId', 'discordId', 'discordUserId', 'targetId'], '')
+  );
+  var targetName = pdv2String_(
+    pdv2Pick_(data, ['targetName', 'name', 'displayName'], '') ||
+    pdv2Pick_(payload, ['targetName', 'cleanDisplayName', 'name', 'displayName'], '')
+  );
+  var storedPayload = data.payload && typeof data.payload === 'object' ? data.payload : data;
 
-    var row = {
-      'Request ID': requestId,
-      'Created At': pdv2Now_(),
-      'Updated At': pdv2Now_(),
-      'Status': PDV2.STATUSES.REQUEST_RECEIVED,
-      'Source': pdv2Pick_(data, ['source'], 'DISCORD_BOT'),
-      'Action Type': actionType,
-      'Submitted By Discord ID': actor,
-      'Target Discord ID': targetDiscordId,
-      'Target Name': targetName,
-      'Old Rank': pdv2Pick_(data, ['oldRank'], ''),
-      'New Rank': pdv2Pick_(data, ['newRank', 'rank'], ''),
-      'Reason': pdv2Pick_(data, ['reason'], ''),
-      'Payload JSON': pdv2SafeJson_(pdv2SanitizeForStorage_(storedPayload)),
-      'Result JSON': '',
-      'Error Message': '',
-      'Completed At': ''
-    };
+  var row = {
+    'Request ID': requestId,
+    'Created At': pdv2Now_(),
+    'Updated At': pdv2Now_(),
+    'Status': PDV2.STATUSES.REQUEST_RECEIVED,
+    'Source': pdv2Pick_(data, ['source'], 'DISCORD_BOT'),
+    'Action Type': actionType,
+    'Submitted By Discord ID': actor,
+    'Target Discord ID': targetDiscordId,
+    'Target Name': targetName,
+    'Old Rank': pdv2Pick_(data, ['oldRank'], ''),
+    'New Rank': pdv2Pick_(data, ['newRank', 'rank'], ''),
+    'Reason': pdv2Pick_(data, ['reason'], ''),
+    'Payload JSON': pdv2SafeJson_(pdv2SanitizeForStorage_(storedPayload)),
+    'Result JSON': '',
+    'Error Message': '',
+    'Completed At': ''
+  };
 
+  pdv2WithLock_(function() {
     pdv2AppendObject_(PDV2.SHEETS.BOT_REQUESTS, row);
     pdv2Audit_(row.Source, 'BOT_REQUEST_RECEIVED', actor, 'BotRequests', requestId, requestId, {
       actionType: actionType,
       targetDiscordId: targetDiscordId
     });
+  });
 
-    var processResult;
-    if (actionType === 'REGISTER_OFFICER') {
-      pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_DIRECT_ROUTE_HIT', 'REGISTER_OFFICER direct route hit from 13_PDV2_Registration override.', {
-        targetDiscordId: targetDiscordId,
-        hasProcessor: typeof pdv2RegisterOfficerFromBotRequest_ === 'function'
-      });
-      processResult = pdv2RegisterOfficerFromBotRequest_(requestId, data);
-    } else {
-      processResult = pdv2ProcessBotRequest_(requestId, actionType, data);
-    }
+  var processResult;
+  if (actionType === 'REGISTER_OFFICER') {
+    pdv2Log_('INFO', requestId, 'REGISTER_OFFICER_DIRECT_ROUTE_HIT', 'REGISTER_OFFICER direct route hit from 13_PDV2_Registration override.', {
+      targetDiscordId: targetDiscordId,
+      hasProcessor: typeof pdv2RegisterOfficerFromBotRequest_ === 'function'
+    });
+    processResult = pdv2RegisterOfficerFromBotRequest_(requestId, data);
+  } else {
+    processResult = pdv2ProcessBotRequest_(requestId, actionType, data);
+  }
 
-    var status = processResult.ok ? PDV2.STATUSES.REQUEST_PROCESSED : PDV2.STATUSES.REQUEST_FAILED;
+  var status = processResult.ok ? PDV2.STATUSES.REQUEST_PROCESSED : PDV2.STATUSES.REQUEST_FAILED;
+  pdv2WithLock_(function() {
     var reqRow = pdv2FindRowByValue_(PDV2.SHEETS.BOT_REQUESTS, 'Request ID', requestId);
     pdv2UpdateRowObject_(PDV2.SHEETS.BOT_REQUESTS, reqRow, {
       'Updated At': pdv2Now_(),
@@ -193,13 +195,13 @@ function pdv2SubmitBotRequest_(data) {
       'Error Message': processResult.ok ? '' : processResult.error,
       'Completed At': pdv2Now_()
     });
+  });
 
-    return pdv2Success_({
-      requestId: requestId,
-      status: status,
-      actionType: actionType,
-      result: processResult
-    });
+  return pdv2Success_({
+    requestId: requestId,
+    status: status,
+    actionType: actionType,
+    result: processResult
   });
 }
 
@@ -212,6 +214,11 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
     var actor = pdv2Pick_(data, ['submittedByDiscordId', 'actorDiscordId'], '');
     var targetDiscordId = pdv2Pick_(data, ['targetDiscordId', 'discordId', 'discordUserId'], '');
     var submittedOrTargetDiscordId = pdv2Pick_(data, ['submittedByDiscordId', 'targetDiscordId', 'discordId', 'discordUserId'], '');
+    var payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+    var targetName = pdv2String_(
+      pdv2Pick_(data, ['targetName', 'name', 'displayName'], '') ||
+      pdv2Pick_(payload, ['targetName', 'cleanDisplayName', 'name', 'displayName'], '')
+    );
 
     if (!actionType) {
       return pdv2Fail_('Bot request is missing actionType.');
