@@ -1,0 +1,9 @@
+name = "department-google-forwarder"
+main = "worker.js"
+compatibility_date = "2026-06-18"
+
+[vars]
+GOOGLE_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/REPLACE_ME/exec"
+
+# Set this as a Cloudflare secret, not a plain var:
+# wrangler secret put GOOGLE_SCRIPT_SECRET
