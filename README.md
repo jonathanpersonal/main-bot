@@ -34,3 +34,5 @@
 18. Confirm close log posts.
 19. Confirm archive/delete behavior works based on config.
 20. Test or confirm approved termination appeals create a Reinstatement ticket.
+
+
