@@ -12,6 +12,8 @@ const {
 
 const { getServerConfig } = require('../utils/configUtils');
 const { buildAppealStartButtonRow } = require('../utils/appealUtils');
+const { safeSubmitDepartmentEvent } = require('../utils/googleDepartmentEvents');
+const { getRankKey, getRankName } = require('../utils/registrationUtils');
 const {
   sendOfficerActionLog,
   sendOfficerRankChangeLog
@@ -843,6 +845,60 @@ async function confirmRankChange({
     changedAt
   });
 
+  await interaction.editReply({
+    content: [
+      `${officerUser} was successfully ${actionPastTense}.`,
+      '',
+      `Old Rank: **${currentRank.name}**`,
+      `New Rank: **${targetRank.name}**`,
+      '',
+      `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
+      `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`,
+      '',
+      'Submitting Google rank-change event now...'
+    ].join('\n'),
+    components: []
+  });
+
+  const oldRankRoleIds = getRankRoleIdsForPayload(currentRank);
+  const newRankRoleIds = getRankRoleIdsForPayload(targetRank);
+  const removedRoleIds = oldRankRoleIds.filter((roleId) => !newRankRoleIds.includes(roleId));
+  const addedRoleIds = newRankRoleIds.filter((roleId) => !oldRankRoleIds.includes(roleId));
+  const googleResult = await safeSubmitDepartmentEvent({
+    interaction,
+    actionType: state.action === 'promote' ? 'PROMOTE' : 'DEMOTE',
+    target: officerUser,
+    targetDiscordId: officerUser.id,
+    targetDiscordTag: officerUser.tag,
+    targetName: officerMember.displayName,
+    oldRank: getRankName(currentRank),
+    newRank: getRankName(targetRank),
+    payload: {
+      action: state.action,
+      officerDiscordId: officerUser.id,
+      officerTag: officerUser.tag,
+      officerDisplayName: officerMember.displayName,
+      oldRankKey: getRankKey(currentRank),
+      oldRankName: getRankName(currentRank),
+      oldRankLevel: currentRank.level,
+      newRankKey: getRankKey(targetRank),
+      newRankName: getRankName(targetRank),
+      newRankLevel: targetRank.level,
+      removedRoleIds,
+      addedRoleIds,
+      roleResult: result,
+      discordActionCompleted: true,
+      handledByDiscordId: interaction.user.id,
+      handledByDiscordTag: interaction.user.tag,
+      handledAt: changedAt.toISOString()
+    },
+    requestFields: {
+      officerDiscordId: officerUser.id,
+      discordId: officerUser.id,
+      upsertByDiscordId: true
+    }
+  });
+
   pendingOfficerActions.delete(stateKey);
 
   return interaction.editReply({
@@ -853,9 +909,36 @@ async function confirmRankChange({
       `New Rank: **${targetRank.name}**`,
       '',
       `Removed Roles: ${result.removedRoles.length > 0 ? result.removedRoles.join(', ') : 'None'}`,
-      `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`
+      `Added Roles: ${result.addedRoles.length > 0 ? result.addedRoles.join(', ') : 'None'}`,
+      '',
+      buildGoogleSubmissionStatus(googleResult)
     ].join('\n'),
     components: []
+  });
+}
+
+
+function buildGoogleSubmissionStatus(googleResult) {
+  if (googleResult?.ok === false) {
+    return `⚠️ Discord roles were changed, but Google logging failed: ${googleResult.error.message}`;
+  }
+
+  const requestId = googleResult?.requestId
+    || googleResult?.botRequestId
+    || googleResult?.data?.requestId
+    || googleResult?.data?.botRequestId;
+  const message = googleResult?.message || googleResult?.data?.message;
+
+  return [
+    '✅ Google rank-change event submitted.',
+    requestId ? `Google Request ID: \`${requestId}\`` : null,
+    message ? `Google Response: ${message}` : null
+  ].filter(Boolean).join('\n');
+}
+
+function getRankRoleIdsForPayload(rank) {
+  return [rank?.rankRoleId, rank?.permissionRoleId].filter((roleId) => {
+    return roleId && typeof roleId === 'string' && !roleId.startsWith('PUT_') && !roleId.startsWith('PASTE_');
   });
 }
 

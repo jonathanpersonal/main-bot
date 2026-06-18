@@ -5,13 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "verify:officer-command": "node scripts/verifyOfficerCommandSchema.js"
+    "verify:officer-command": "node scripts/verifyOfficerCommandSchema.js",
+    "check:conflicts": "node scripts/checkNoConflictMarkers.js"
   },
   "dependencies": {
     "discord.js": "^14.0.0",
     "dotenv": "^16.0.0",
     "mysql2": "^3.11.0",
-    "node-cron": "^3.0.3",
-    "ts3-nodejs-library": "^3.1.0"
+    "node-cron": "^3.0.3"
   }
 }
