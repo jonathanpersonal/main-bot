@@ -637,6 +637,7 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
   const changedAt = new Date();
   let roleResult = null;
   let previousRoleResult = null;
+  let previousOfficerRoleId = null;
   let dmSent = false;
   let appealButtonIncluded = false;
 
@@ -655,7 +656,7 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
   if (state.action === 'termination' || state.action === 'resignation') {
     const auditReason = `${ACTION_LABELS[state.action]} processed by ${interaction.user.tag}. Reason: ${state.details.reason}`;
 
-    const previousOfficerRoleId = serverConfig?.officerManagement?.previousOfficerRoleId
+    previousOfficerRoleId = serverConfig?.officerManagement?.previousOfficerRoleId
       || serverConfig?.roles?.previousOfficerRoleId;
     const previousRoleValidation = await validateConfiguredRoleCanBeAdded(officerMember, previousOfficerRoleId);
 
@@ -749,7 +750,17 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
     });
   }
 
-  // TODO: Later send this officer management action to Google webhook.
+  const googleResult = await submitOfficerActionToGoogle({
+    interaction,
+    state,
+    officerUser,
+    officerMember,
+    roleResult,
+    previousRoleResult,
+    previousOfficerRoleId,
+    dmSent,
+    changedAt
+  });
 
   pendingOfficerActions.delete(stateKey);
 
@@ -760,7 +771,8 @@ async function confirmOfficerAction({ interaction, state, stateKey }) {
       roleResult,
       previousRoleResult,
       dmSent,
-      appealButtonIncluded
+      appealButtonIncluded,
+      googleResult
     }),
     components: []
   });
@@ -934,6 +946,118 @@ function buildGoogleSubmissionStatus(googleResult) {
     requestId ? `Google Request ID: \`${requestId}\`` : null,
     message ? `Google Response: ${message}` : null
   ].filter(Boolean).join('\n');
+}
+
+async function submitOfficerActionToGoogle({
+  interaction,
+  state,
+  officerUser,
+  officerMember,
+  roleResult,
+  previousRoleResult,
+  previousOfficerRoleId,
+  dmSent,
+  changedAt
+}) {
+  const actionType = state.action.toUpperCase();
+  const commonPayload = {
+    action: state.action,
+    officerDiscordId: officerUser.id,
+    officerTag: officerUser.tag,
+    officerDisplayName: officerMember?.displayName || officerUser.globalName || officerUser.username,
+    handledByDiscordId: interaction.user.id,
+    handledByDiscordTag: interaction.user.tag,
+    handledAt: changedAt.toISOString()
+  };
+  const requestFields = {
+    officerDiscordId: officerUser.id,
+    discordId: officerUser.id
+  };
+
+  if (state.action === 'termination' || state.action === 'resignation') {
+    const removedRoleIds = roleResult?.removedRoleIds || [];
+    const addedRoleIds = previousRoleResult?.added && previousOfficerRoleId
+      ? [previousOfficerRoleId]
+      : [];
+
+    return safeSubmitDepartmentEvent({
+      interaction,
+      actionType,
+      target: officerUser,
+      targetDiscordId: officerUser.id,
+      targetDiscordTag: officerUser.tag,
+      targetName: officerMember?.displayName,
+      reason: state.details.reason,
+      payload: {
+        ...commonPayload,
+        reason: state.details.reason,
+        evidence: state.details.evidence,
+        comments: state.details.comments,
+        blacklisted: state.details.blacklisted,
+        canReapply: state.details.canReapply,
+        removedRoleIds,
+        addedRoleIds,
+        dmSent,
+        discordActionCompleted: true
+      },
+      requestFields: {
+        ...requestFields,
+        evidence: state.details.evidence,
+        comments: state.details.comments
+      }
+    });
+  }
+
+  if (state.action === 'coaching') {
+    return safeSubmitDepartmentEvent({
+      interaction,
+      actionType,
+      target: officerUser,
+      targetDiscordId: officerUser.id,
+      targetDiscordTag: officerUser.tag,
+      targetName: officerMember?.displayName,
+      reason: state.details.reason,
+      payload: {
+        ...commonPayload,
+        reason: state.details.reason,
+        discussed: state.details.discussion,
+        nextSteps: state.details.nextSteps,
+        notes: state.details.nextSteps
+      },
+      requestFields: {
+        ...requestFields,
+        notes: state.details.nextSteps
+      }
+    });
+  }
+
+  if (state.action === 'strike') {
+    return safeSubmitDepartmentEvent({
+      interaction,
+      actionType,
+      target: officerUser,
+      targetDiscordId: officerUser.id,
+      targetDiscordTag: officerUser.tag,
+      targetName: officerMember?.displayName,
+      reason: state.details.reason,
+      payload: {
+        ...commonPayload,
+        strikeLevel: state.strikeLevel,
+        reason: state.details.reason,
+        evidence: state.details.evidence,
+        preventionSteps: state.details.nextSteps,
+        dmSent
+      },
+      requestFields: {
+        ...requestFields,
+        strikeLevel: state.strikeLevel,
+        evidence: state.details.evidence,
+        notes: state.details.nextSteps
+      }
+    });
+  }
+
+  return null;
 }
 
 function getRankRoleIdsForPayload(rank) {
@@ -1167,7 +1291,7 @@ function createCaseId(action, strikeLevel) {
   return `${action.slice(0, 2)}${suffix}`;
 }
 
-function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent, appealButtonIncluded }) {
+function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResult, dmSent, appealButtonIncluded, googleResult }) {
   const lines = [
     `${ACTION_LABELS[state.action]} completed for ${officerUser}.`,
     '',
@@ -1203,5 +1327,27 @@ function buildSuccessMessage({ state, officerUser, roleResult, previousRoleResul
 
   lines.push('Staff log was attempted.');
 
+  if (googleResult) {
+    lines.push('', buildOfficerActionGoogleStatus(googleResult));
+  }
+
   return lines.join('\n');
+}
+
+function buildOfficerActionGoogleStatus(googleResult) {
+  if (googleResult?.ok === false) {
+    return `⚠️ Discord action completed, but Google logging failed: ${googleResult.error.message}`;
+  }
+
+  const requestId = googleResult?.requestId
+    || googleResult?.botRequestId
+    || googleResult?.data?.requestId
+    || googleResult?.data?.botRequestId;
+  const message = googleResult?.message || googleResult?.data?.message;
+
+  return [
+    '✅ Google officer-management event submitted.',
+    requestId ? `Google Request ID: \`${requestId}\`` : null,
+    message ? `Google Response: ${message}` : null
+  ].filter(Boolean).join('\n');
 }
