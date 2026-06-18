@@ -5,6 +5,23 @@ function cleanRoleIds(values = []) {
   return [...new Set((Array.isArray(values) ? values : [values]).filter((v) => typeof v === 'string' && v && !v.startsWith('PUT_') && !v.startsWith('PASTE_')))];
 }
 
+function cleanUserIds(values = []) {
+  return [...new Set((Array.isArray(values) ? values : [values]).filter((v) => typeof v === 'string' && v && !v.startsWith('PUT_') && !v.startsWith('PASTE_')))];
+}
+
+function splitEnvList(value = '') {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function envFlag(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  return ['true', '1', 'yes', 'y', 'on'].includes(String(value).trim().toLowerCase());
+}
+
 function hasAnyRole(member, roleIds = []) { return cleanRoleIds(roleIds).some((id) => member?.roles?.cache?.has(id)); }
 function hasAllRoles(member, roleIds = []) { const ids = cleanRoleIds(roleIds); return ids.length > 0 && ids.every((id) => member?.roles?.cache?.has(id)); }
 
@@ -57,6 +74,39 @@ function canUseCommand(member, config, permissionKey) {
   return memberHasPermissionGroup(member, config, rule.groups, rule.fallback);
 }
 
+function isDevOnlyEnabled(config = {}) {
+  return Boolean(config?.devOnly?.enabled || envFlag('DEV_ONLY_ENABLED') || envFlag('DEV_ONLY_MODE'));
+}
+
+function getDevOnlyRoleIds(config = {}) {
+  return cleanRoleIds([
+    ...(config?.devOnly?.roleIds || []),
+    ...splitEnvList(process.env.DEV_ONLY_ROLE_IDS)
+  ]);
+}
+
+function getDevOnlyUserIds(config = {}) {
+  return cleanUserIds([
+    ...(config?.devOnly?.userIds || []),
+    ...splitEnvList(process.env.DEV_ONLY_USER_IDS)
+  ]);
+}
+
+function hasDevOnlyAccess(member, user, config = {}) {
+  if (!isDevOnlyEnabled(config)) return true;
+
+  const userIds = getDevOnlyUserIds(config);
+  if (user?.id && userIds.includes(user.id)) return true;
+
+  const roleIds = getDevOnlyRoleIds(config);
+  if (roleIds.length > 0 && hasAnyRole(member, roleIds)) return true;
+
+  if (config?.devOnly?.bypassForBotAdmins !== false && canUseCommand(member, config, 'botAdmin')) return true;
+  if (member?.permissions?.has(PermissionFlagsBits.Administrator)) return true;
+
+  return false;
+}
+
 async function logDenied(interaction, permissionKey) {
   const config = getServerConfig(interaction.guildId);
   const channelId = config?.channels?.botAdminLogChannelId || config?.channels?.staffLogChannelId || config?.logging?.staffLogChannelId;
@@ -73,6 +123,24 @@ async function requirePermission(interaction, permissionKey, options = {}) {
   return false;
 }
 
+async function requireDevOnlyAccess(interaction, options = {}) {
+  const config = options.config || getServerConfig(interaction.guildId);
+  if (!isDevOnlyEnabled(config)) return true;
+  if (hasDevOnlyAccess(interaction.member, interaction.user, config)) return true;
+
+  if (options.log !== false) await logDenied(interaction, 'devOnly');
+
+  const payload = {
+    content: options.message || config?.devOnly?.message || 'This bot is currently in dev-only mode. You do not have permission to use it yet.',
+    ephemeral: true
+  };
+
+  if (interaction.replied || interaction.deferred) await interaction.followUp(payload);
+  else await interaction.reply(payload);
+
+  return false;
+}
+
 const isBotAdmin = (m,c) => canUseCommand(m,c,'botAdmin');
 const isCommandStaff = (m,c) => canUseCommand(m,c,'commandStaff');
 const isHighCommand = (m,c) => canUseCommand(m,c,'highCommand');
@@ -83,4 +151,28 @@ const isDepartmentCommand = (m,c) => canUseCommand(m,c,'departmentCommand');
 const canManageTraining = (m,c,l='officer') => canUseCommand(m,c,l==='command'?'ftoCommand':'trainingOfficer');
 const canManageProbation = (m,c,l='officer') => canUseCommand(m,c,l==='command'?'ftoCommand':'trainingOfficer');
 
-module.exports = { cleanRoleIds, hasAnyRole, hasAllRoles, roleGroups, memberHasAnyRole: hasAnyRole, memberHasPermissionGroup, isBotAdmin, isCommandStaff, isHighCommand, isSupervisor, isTrainingOfficer, isFtoCommand, isDepartmentCommand, canUseCommand, requirePermission, canManageTraining, canManageProbation };
+module.exports = {
+  cleanRoleIds,
+  cleanUserIds,
+  hasAnyRole,
+  hasAllRoles,
+  roleGroups,
+  memberHasAnyRole: hasAnyRole,
+  memberHasPermissionGroup,
+  isBotAdmin,
+  isCommandStaff,
+  isHighCommand,
+  isSupervisor,
+  isTrainingOfficer,
+  isFtoCommand,
+  isDepartmentCommand,
+  canUseCommand,
+  requirePermission,
+  canManageTraining,
+  canManageProbation,
+  isDevOnlyEnabled,
+  getDevOnlyRoleIds,
+  getDevOnlyUserIds,
+  hasDevOnlyAccess,
+  requireDevOnlyAccess
+};

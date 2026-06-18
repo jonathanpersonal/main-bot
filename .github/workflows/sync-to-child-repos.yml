@@ -10,7 +10,7 @@ on:
 
 jobs:
   sync:
-    name: Sync shared bot code to child repo
+    name: Sync shared bot code to child repo (${{ matrix.child_repo }})
     runs-on: ubuntu-latest
 
     strategy:
@@ -23,7 +23,7 @@ jobs:
       - name: Checkout main-bot
         uses: actions/checkout@v4
 
-      - name: Build safe branch name
+      - name: Create safe sync branch name
         run: |
           set -euo pipefail
 
@@ -40,26 +40,16 @@ jobs:
           SYNC_BRANCH="sync/${SAFE_RELEASE}-${GITHUB_RUN_NUMBER}"
 
           echo "SYNC_BRANCH=$SYNC_BRANCH" >> "$GITHUB_ENV"
-          echo "RAW_RELEASE=$RAW_RELEASE" >> "$GITHUB_ENV"
           echo "Using sync branch: $SYNC_BRANCH"
 
       - name: Clone child repo
-        env:
-          BOT_SYNC_TOKEN: ${{ secrets.BOT_SYNC_TOKEN }}
         run: |
           set -euo pipefail
-
-          if [ -z "${BOT_SYNC_TOKEN:-}" ]; then
-            echo "BOT_SYNC_TOKEN secret is missing or empty."
-            exit 1
-          fi
-
-          git clone "https://x-access-token:${BOT_SYNC_TOKEN}@github.com/${{ matrix.child_repo }}" child-repo
+          git clone https://x-access-token:${{ secrets.BOT_SYNC_TOKEN }}@github.com/${{ matrix.child_repo }} child-repo
 
       - name: Prepare sync branch
         run: |
           set -euo pipefail
-
           cd child-repo
           git config user.name "department-bot-sync"
           git config user.email "department-bot-sync@users.noreply.github.com"
@@ -69,19 +59,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          # These folders are shared bot source code and should match main-bot.
           rsync -av --delete commands/ child-repo/commands/
           rsync -av --delete handlers/ child-repo/handlers/
           rsync -av --delete scripts/ child-repo/scripts/
           rsync -av --delete services/ child-repo/services/
           rsync -av --delete utils/ child-repo/utils/
 
-          # IMPORTANT:
-          # Do not wipe child-repo/config because child bots keep server-specific
-          # roles, channels, ranks, webhook URLs, and department settings there.
+          # Config is special: never overwrite the child bot's live server config.
           mkdir -p child-repo/config
 
-          # Safe shared config files/templates only.
+          # Shared reusable config defaults should sync.
           if [ -f config/defaultGuildConfig.js ]; then
             cp config/defaultGuildConfig.js child-repo/config/defaultGuildConfig.js
           fi
@@ -98,32 +85,13 @@ jobs:
             rsync -av --delete config/templates/ child-repo/config/templates/
           fi
 
-          # Explicitly never overwrite these child-specific config locations.
-          # This protects files like:
-          #   config/serverConfig.js
-          #   config/guildConfigs/*.js
-          #   config/*.local.js
-          #   config/*.secret.js
-
-          # Do not wipe child-repo/database because child bots may keep live DB files there.
-          # Copy only shared schema/template files.
+          # Database is also special: sync templates only, not child live data/config.
           mkdir -p child-repo/database
-
-          find database -maxdepth 1 -type f \( \
-            -name '*.sql' -o \
-            -name '*.schema.js' -o \
-            -name '*.template.js' -o \
-            -name '*.example.js' -o \
-            -name '*.md' \
-          \) -print0 2>/dev/null | while IFS= read -r -d '' file; do
-            cp "$file" "child-repo/database/$(basename "$file")"
-          done
 
           if [ -d database/templates ]; then
             rsync -av --delete database/templates/ child-repo/database/templates/
           fi
 
-          # Optional shared folders.
           if [ -d cloudflare ]; then
             rsync -av --delete cloudflare/ child-repo/cloudflare/
           fi
@@ -132,7 +100,6 @@ jobs:
             rsync -av --delete "z Google Database System/" "child-repo/z Google Database System/"
           fi
 
-          # Root shared files.
           cp index.js child-repo/index.js
           cp package.json child-repo/package.json
 
@@ -152,10 +119,9 @@ jobs:
             cp .env.example child-repo/.env.example
           fi
 
-      - name: Show sync summary
+      - name: Show changed files
         run: |
           set -euo pipefail
-
           cd child-repo
           echo "Files changed by sync:"
           git status --short
@@ -164,7 +130,6 @@ jobs:
         id: commit
         run: |
           set -euo pipefail
-
           cd child-repo
 
           if git diff --quiet && git diff --cached --quiet; then
@@ -172,7 +137,7 @@ jobs:
             echo "No changes found for ${{ matrix.child_repo }}"
           else
             git add .
-            git commit -m "Sync main-bot $RAW_RELEASE"
+            git commit -m "Sync main-bot ${{ inputs.release_name }}"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -180,7 +145,6 @@ jobs:
         if: steps.commit.outputs.changed == 'true'
         run: |
           set -euo pipefail
-
           cd child-repo
           git push origin "$SYNC_BRANCH"
 
@@ -190,20 +154,23 @@ jobs:
           GH_TOKEN: ${{ secrets.BOT_SYNC_TOKEN }}
         run: |
           set -euo pipefail
-
           cd child-repo
           gh pr create \
-            --repo "${{ matrix.child_repo }}" \
+            --repo ${{ matrix.child_repo }} \
             --base main \
             --head "$SYNC_BRANCH" \
-            --title "Sync main-bot $RAW_RELEASE" \
+            --title "Sync main-bot ${{ inputs.release_name }}" \
             --body "This PR syncs shared bot code from jonathanpersonal/main-bot.
 
           Source repo: jonathanpersonal/main-bot
-          Release/sync name: $RAW_RELEASE
-          Safe branch name: $SYNC_BRANCH
+          Release/sync name: ${{ inputs.release_name }}
           Source workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-          Protected child-specific files are not overwritten by this sync, including live config/serverConfig.js and live config/guildConfigs/*.js.
+          Review before merging, especially if this child bot has custom files.
 
-          Review before merging, especially if this child bot has custom files."
+          Protected child-specific files:
+          - config/serverConfig.js
+          - config/guildConfigs/*.js
+          - config/*.local.js
+          - config/*.secret.js
+          - live database files outside database/templates/"

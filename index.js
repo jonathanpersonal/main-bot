@@ -45,7 +45,26 @@ client.once(Events.ClientReady, (readyClient) => {
   }
 });
 
+client.on(Events.Error, (error) => {
+  console.error('Discord client error:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled promise rejection:', error);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    await handleInteraction(interaction);
+  } catch (error) {
+    console.error('Unhandled interaction error:', error);
+    await sendInteractionError(interaction).catch((replyError) => {
+      console.error('Could not send interaction error response:', replyError);
+    });
+  }
+});
+
+async function handleInteraction(interaction) {
   if (interaction.guildId) {
     const config = getServerConfig(interaction.guildId);
     if (isDevOnlyEnabled(config) && !await requireDevOnlyAccess(interaction, { config })) return;
@@ -108,7 +127,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     await sendInteractionError(interaction);
   }
-});
+}
 
 
 async function handleTicketInteraction(interaction) {
