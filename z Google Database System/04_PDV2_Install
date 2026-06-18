@@ -32,7 +32,14 @@ function pdv2SeedSystemConfig_() {
     ['DEFAULT_DEPARTMENT_KEY', PDV2.DEFAULTS.DEFAULT_DEPARTMENT_KEY, 'Default department key used when no department is supplied.'],
     ['TIMEZONE', PDV2.DEFAULTS.TIMEZONE, 'Timezone used by this server database.'],
     ['BOT_API_ENABLED', PDV2.DEFAULTS.BOT_API_ENABLED, 'TRUE/FALSE toggle for bot API routes.'],
-    ['UI_BACKEND_ENABLED', PDV2.DEFAULTS.UI_BACKEND_ENABLED, 'TRUE/FALSE toggle for future Apps Script UI backend routes.']
+    ['UI_BACKEND_ENABLED', PDV2.DEFAULTS.UI_BACKEND_ENABLED, 'TRUE/FALSE toggle for future Apps Script UI backend routes.'],
+    ['CALLSIGN_ASSIGN_ON_REGISTER', 'FALSE', 'TRUE/FALSE toggle for automatic callsign assignment during registration.'],
+    ['CALLSIGN_ASSIGN_ON_PROMOTE', 'TRUE', 'TRUE/FALSE toggle for automatic callsign assignment after promotion.'],
+    ['CALLSIGN_ASSIGN_ON_DEMOTE', 'FALSE', 'TRUE/FALSE toggle for automatic callsign assignment after demotion.'],
+    ['CALLSIGN_ASSIGN_ONLY_IF_EMPTY', 'TRUE', 'TRUE/FALSE toggle to avoid assigning a second callsign.'],
+    ['CALLSIGN_RELEASE_ON_TERMINATION', 'FALSE', 'TRUE/FALSE toggle reserved for future termination release automation.'],
+    ['CALLSIGN_RELEASE_ON_RESIGNATION', 'FALSE', 'TRUE/FALSE toggle reserved for future resignation release automation.'],
+    ['CALLSIGN_ASSIGNABLE_RANKS', '', 'Optional comma/newline separated rank keys or names eligible for callsign assignment. Blank allows all ranks.']
   ];
 
   rows.forEach(function(row) {
@@ -125,7 +132,8 @@ function pdv2SeedDemoCallsignSlots_() {
         'Callsign': item[0],
         'Rank': item[1],
         'Department': dept,
-        'Slot Status': 'OPEN',
+        'Slot Status': 'AVAILABLE',
+        'Status': 'AVAILABLE',
         'Assigned Discord ID': '',
         'Assigned Name': '',
         'Assigned Date': '',
