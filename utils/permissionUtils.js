@@ -4,14 +4,14 @@ const { getServerConfig } = require('./configUtils');
 function cleanRoleIds(values = []) {
   return [...new Set(
     (Array.isArray(values) ? values : [values])
-      .filter((v) => typeof v === 'string' && v && !v.startsWith('PUT_') && !v.startsWith('PASTE_'))
+      .filter((value) => typeof value === 'string' && value && !value.startsWith('PUT_') && !value.startsWith('PASTE_'))
   )];
 }
 
 function cleanUserIds(values = []) {
   return [...new Set(
     (Array.isArray(values) ? values : [values])
-      .filter((v) => typeof v === 'string' && v && !v.startsWith('PUT_') && !v.startsWith('PASTE_'))
+      .filter((value) => typeof value === 'string' && value && !value.startsWith('PUT_') && !value.startsWith('PASTE_'))
   )];
 }
 
@@ -20,6 +20,12 @@ function splitEnvList(value = '') {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function envFlag(name, fallback = false) {
+  const value = process.env[name];
+  if (value === undefined || value === null || value === '') return fallback;
+  return ['true', '1', 'yes', 'y', 'on'].includes(String(value).trim().toLowerCase());
 }
 
 function hasAnyRole(member, roleIds = []) {
@@ -42,6 +48,7 @@ function roleGroups(config = {}) {
       ...(p.setupAdminRoleIds || [])
     ]),
 
+    setupAdmin: cleanRoleIds([...(p.setupAdminRoleIds || [])]),
     commandStaff: cleanRoleIds(p.commandStaffRoleIds || []),
     highCommand: cleanRoleIds(p.highCommandRoleIds || []),
     supervisor: cleanRoleIds(p.supervisorRoleIds || []),
@@ -86,7 +93,7 @@ function roleGroups(config = {}) {
 
 function memberHasPermissionGroup(member, config, groups = [], fallbackPermission = null) {
   const all = roleGroups(config);
-  const roleIds = groups.flatMap((g) => all[g] || []);
+  const roleIds = groups.flatMap((groupName) => all[groupName] || []);
 
   if (roleIds.length > 0) return hasAnyRole(member, roleIds);
 
@@ -96,6 +103,11 @@ function memberHasPermissionGroup(member, config, groups = [], fallbackPermissio
 }
 
 const permissionMap = {
+  setupAdmin: {
+    groups: ['setupAdmin', 'botAdmin'],
+    fallback: PermissionFlagsBits.Administrator
+  },
+
   botAdmin: {
     groups: ['botAdmin'],
     fallback: PermissionFlagsBits.Administrator
@@ -166,6 +178,61 @@ function canUseCommand(member, config, permissionKey) {
   return memberHasPermissionGroup(member, config, rule.groups, rule.fallback);
 }
 
+function isDevOnlyEnabled(config = {}) {
+  return Boolean(
+    config?.devOnly?.enabled ||
+    config?.developerOnly?.enabled ||
+    config?.devOnlyEnabled ||
+    envFlag('DEV_ONLY_ENABLED') ||
+    envFlag('DEV_ONLY_MODE')
+  );
+}
+
+function getDevOnlySettings(config = {}) {
+  const devOnly = config.devOnly || config.developerOnly || {};
+
+  return {
+    enabled: isDevOnlyEnabled(config),
+
+    allowedUserIds: cleanUserIds([
+      ...(devOnly.allowedUserIds || []),
+      ...(devOnly.userIds || []),
+      ...(devOnly.developerUserIds || []),
+      ...(config.devOnlyUserIds || []),
+      ...splitEnvList(process.env.DEV_ONLY_USER_IDS),
+      ...splitEnvList(process.env.DEVELOPER_USER_IDS)
+    ]),
+
+    allowedRoleIds: cleanRoleIds([
+      ...(devOnly.allowedRoleIds || []),
+      ...(devOnly.roleIds || []),
+      ...(devOnly.developerRoleIds || []),
+      ...(config.devOnlyRoleIds || []),
+      ...splitEnvList(process.env.DEV_ONLY_ROLE_IDS),
+      ...splitEnvList(process.env.DEVELOPER_ROLE_IDS)
+    ]),
+
+    allowBotAdmins: devOnly.allowBotAdmins !== false && devOnly.bypassForBotAdmins !== false,
+    allowAdministrators: devOnly.allowAdministrators !== false && devOnly.bypassForAdministrators !== false,
+
+    message:
+      devOnly.message ||
+      'This bot is currently in development/testing mode. You do not have access yet.'
+  };
+}
+
+function hasDevOnlyAccess(member, user, config = {}) {
+  const settings = getDevOnlySettings(config);
+  if (!settings.enabled) return true;
+
+  if (user?.id && settings.allowedUserIds.includes(user.id)) return true;
+  if (hasAnyRole(member, settings.allowedRoleIds)) return true;
+  if (settings.allowBotAdmins && canUseCommand(member, config, 'botAdmin')) return true;
+  if (settings.allowAdministrators && member?.permissions?.has(PermissionFlagsBits.Administrator)) return true;
+
+  return false;
+}
+
 async function logDenied(interaction, permissionKey) {
   const config = getServerConfig(interaction.guildId);
 
@@ -186,6 +253,8 @@ async function logDenied(interaction, permissionKey) {
 }
 
 async function safePermissionReply(interaction, message) {
+  if (!interaction?.isRepliable?.()) return;
+
   const payload = {
     content: message,
     ephemeral: true
@@ -217,86 +286,12 @@ async function requirePermission(interaction, permissionKey, options = {}) {
   return false;
 }
 
-/**
- * Dev-only mode is a global safety gate.
- *
- * Supported config shapes:
- *
- * devOnly: {
- *   enabled: false,
- *   allowedUserIds: [],
- *   allowedRoleIds: [],
- *   allowBotAdmins: true,
- *   allowAdministrators: true,
- *   message: 'This bot is currently in development/testing mode.'
- * }
- *
- * Also supports older/simple fields:
- * devOnlyEnabled: true
- * developerOnly.enabled: true
- */
-function isDevOnlyEnabled(config = {}) {
-  return Boolean(
-    config?.devOnly?.enabled ||
-    config?.developerOnly?.enabled ||
-    config?.devOnlyEnabled
-  );
-}
-
-function getDevOnlySettings(config = {}) {
-  const devOnly = config.devOnly || config.developerOnly || {};
-
-  return {
-    enabled: isDevOnlyEnabled(config),
-
-    allowedUserIds: cleanUserIds([
-      ...(devOnly.allowedUserIds || []),
-      ...(devOnly.userIds || []),
-      ...(devOnly.developerUserIds || []),
-      ...(config.devOnlyUserIds || []),
-      ...splitEnvList(process.env.DEV_ONLY_USER_IDS),
-      ...splitEnvList(process.env.DEVELOPER_USER_IDS)
-    ]),
-
-    allowedRoleIds: cleanRoleIds([
-      ...(devOnly.allowedRoleIds || []),
-      ...(devOnly.roleIds || []),
-      ...(devOnly.developerRoleIds || []),
-      ...(config.devOnlyRoleIds || []),
-      ...splitEnvList(process.env.DEV_ONLY_ROLE_IDS),
-      ...splitEnvList(process.env.DEVELOPER_ROLE_IDS)
-    ]),
-
-    allowBotAdmins: devOnly.allowBotAdmins !== false,
-    allowAdministrators: devOnly.allowAdministrators !== false,
-
-    message:
-      devOnly.message ||
-      'This bot is currently in development/testing mode. You do not have access yet.'
-  };
-}
-
 async function requireDevOnlyAccess(interaction, options = {}) {
   const config = options.config || getServerConfig(interaction.guildId);
   const settings = getDevOnlySettings(config);
 
   if (!settings.enabled) return true;
-
-  const member = interaction.member;
-  const userId = interaction.user?.id;
-
-  if (userId && settings.allowedUserIds.includes(userId)) return true;
-
-  if (hasAnyRole(member, settings.allowedRoleIds)) return true;
-
-  if (settings.allowBotAdmins && canUseCommand(member, config, 'botAdmin')) return true;
-
-  if (
-    settings.allowAdministrators &&
-    member?.permissions?.has(PermissionFlagsBits.Administrator)
-  ) {
-    return true;
-  }
+  if (hasDevOnlyAccess(interaction.member, interaction.user, config)) return true;
 
   if (options.log !== false) await logDenied(interaction, 'devOnly');
 
@@ -305,6 +300,7 @@ async function requireDevOnlyAccess(interaction, options = {}) {
   return false;
 }
 
+const isSetupAdmin = (member, config) => canUseCommand(member, config, 'setupAdmin');
 const isBotAdmin = (member, config) => canUseCommand(member, config, 'botAdmin');
 const isCommandStaff = (member, config) => canUseCommand(member, config, 'commandStaff');
 const isHighCommand = (member, config) => canUseCommand(member, config, 'highCommand');
@@ -322,6 +318,8 @@ const canManageProbation = (member, config, level = 'officer') =>
 module.exports = {
   cleanRoleIds,
   cleanUserIds,
+  splitEnvList,
+  envFlag,
   hasAnyRole,
   hasAllRoles,
   roleGroups,
@@ -329,6 +327,7 @@ module.exports = {
   memberHasAnyRole: hasAnyRole,
   memberHasPermissionGroup,
 
+  isSetupAdmin,
   isBotAdmin,
   isCommandStaff,
   isHighCommand,
@@ -341,8 +340,9 @@ module.exports = {
   requirePermission,
 
   isDevOnlyEnabled,
-  requireDevOnlyAccess,
   getDevOnlySettings,
+  hasDevOnlyAccess,
+  requireDevOnlyAccess,
 
   canManageTraining,
   canManageProbation

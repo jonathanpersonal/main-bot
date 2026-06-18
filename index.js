@@ -4,15 +4,28 @@ const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const ticketUtils = require('./utils/ticketUtils');
 const { loadCommands } = require('./handlers/commandHandler');
 const { getServerConfig, validateServerConfig } = require('./utils/configUtils');
-const { requireDevOnlyAccess, isDevOnlyEnabled } = require('./utils/permissionUtils');
+const permissionUtils = require('./utils/permissionUtils');
 const { handleAppealInteraction } = require('./utils/appealUtils');
 const { startLoaDailySyncScheduler } = require('./utils/loaSync');
 const { startGooglePoller } = require('./services/googlePoller');
 const { startCadetDeadlineService } = require('./services/cadetDeadlineService');
 const { startProbationCheckService } = require('./services/probationCheckService');
 
+const isDevOnlyEnabled = typeof permissionUtils.isDevOnlyEnabled === 'function'
+  ? permissionUtils.isDevOnlyEnabled
+  : () => false;
+
+const requireDevOnlyAccess = typeof permissionUtils.requireDevOnlyAccess === 'function'
+  ? permissionUtils.requireDevOnlyAccess
+  : async () => true;
+
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 client.commands = new Collection();
@@ -53,6 +66,10 @@ process.on('unhandledRejection', (error) => {
   console.error('Unhandled promise rejection:', error);
 });
 
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     await handleInteraction(interaction);
@@ -67,7 +84,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 async function handleInteraction(interaction) {
   if (interaction.guildId) {
     const config = getServerConfig(interaction.guildId);
-    if (isDevOnlyEnabled(config) && !await requireDevOnlyAccess(interaction, { config })) return;
+
+    if (isDevOnlyEnabled(config)) {
+      const hasDevAccess = await requireDevOnlyAccess(interaction, { config });
+      if (!hasDevAccess) return;
+    }
   }
 
   if (await handleTicketInteraction(interaction)) return;
@@ -124,11 +145,9 @@ async function handleInteraction(interaction) {
     await command.execute(interaction, client);
   } catch (error) {
     console.error(`Error running /${interaction.commandName}:`, error);
-
     await sendInteractionError(interaction);
   }
 }
-
 
 async function handleTicketInteraction(interaction) {
   const customId = interaction.customId || '';
@@ -186,6 +205,8 @@ async function handleCommandInteraction(interaction, handlerName, interactionTyp
 }
 
 async function sendInteractionError(interaction) {
+  if (!interaction || !interaction.isRepliable?.()) return;
+
   const errorMessage = {
     content: 'There was an error while running this command.',
     ephemeral: true
@@ -210,4 +231,7 @@ async function startBot() {
   await client.login(process.env.DISCORD_TOKEN);
 }
 
-startBot();
+startBot().catch((error) => {
+  console.error('Failed to start bot:', error);
+  process.exit(1);
+});
