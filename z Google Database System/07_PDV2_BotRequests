@@ -402,7 +402,14 @@ function pdv2SyncRanksConfig_(data) {
         'Activity Active Hours': rank.activityActiveHours == null ? '' : rank.activityActiveHours,
         'Activity Semi Active Hours': rank.activitySemiActiveHours == null ? '' : rank.activitySemiActiveHours,
         'Activity Exempt': rank.activityExempt === true ? 'TRUE' : 'FALSE',
-        'Activity Cadet': rank.activityCadet === true ? 'TRUE' : 'FALSE'
+        'Activity Cadet': rank.activityCadet === true ? 'TRUE' : 'FALSE',
+        'Command Staff': rank.commandStaff === true ? 'TRUE' : 'FALSE',
+        'Supervisor': rank.supervisor === true ? 'TRUE' : 'FALSE',
+        'Supervisor In Training': rank.supervisorInTraining === true ? 'TRUE' : 'FALSE',
+        'Dept Admin Staff': rank.deptAdminStaff === true ? 'TRUE' : 'FALSE',
+        'Probationary': rank.probationary === true ? 'TRUE' : 'FALSE',
+        'Recruit': rank.recruit === true ? 'TRUE' : 'FALSE',
+        'Minimum Days In Rank': rank.minimumDaysInRank == null ? '' : rank.minimumDaysInRank
       };
       var rowNumber = index[rankKey.toLowerCase() + '|' + department.toLowerCase()];
       if (rowNumber) {

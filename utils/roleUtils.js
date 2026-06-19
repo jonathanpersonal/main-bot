@@ -13,12 +13,17 @@ function isUsableRoleId(roleId) {
   );
 }
 
-function getRankRoleIds(rank) {
-  if (!rank) return [];
+function getDepartmentMemberRoleId(config) {
+  return config?.department?.memberRoleId || config?.roles?.departmentMemberRoleId || '';
+}
+
+function getRankRoleIds(rank, config = null) {
+  if (!rank) return getUniqueRoleIds([getDepartmentMemberRoleId(config)]);
 
   return getUniqueRoleIds([
     rank.rankRoleId,
-    rank.permissionRoleId
+    rank.permissionRoleId,
+    getDepartmentMemberRoleId(config)
   ]);
 }
 
@@ -29,6 +34,7 @@ function getConfiguredDepartmentRoleIds(config) {
 
   return getUniqueRoleIds([
     ...rankRoleIds,
+    config?.department?.memberRoleId,
     config?.roles?.departmentMemberRoleId,
     ...(Array.isArray(config?.officerManagement?.extraDepartmentRoleIds)
       ? config.officerManagement.extraDepartmentRoleIds
@@ -36,7 +42,7 @@ function getConfiguredDepartmentRoleIds(config) {
   ]);
 }
 
-function validateBotCanManageRankChange(guild, botMember, oldRank, newRank) {
+function validateBotCanManageRankChange(guild, botMember, oldRank, newRank, config = null) {
   const problems = [];
 
   if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
@@ -44,8 +50,8 @@ function validateBotCanManageRankChange(guild, botMember, oldRank, newRank) {
   }
 
   const roleIdsToCheck = getUniqueRoleIds([
-    ...getRankRoleIds(oldRank),
-    ...getRankRoleIds(newRank)
+    ...getRankRoleIds(oldRank, config),
+    ...getRankRoleIds(newRank, config)
   ]);
 
   for (const roleId of roleIdsToCheck) {
@@ -72,10 +78,10 @@ function validateBotCanManageRankChange(guild, botMember, oldRank, newRank) {
   };
 }
 
-async function changeMemberRank(member, oldRank, newRank, reason) {
-  const newRoleIds = getRankRoleIds(newRank);
+async function changeMemberRank(member, oldRank, newRank, reason, config = null) {
+  const newRoleIds = getRankRoleIds(newRank, config);
 
-  const roleIdsToRemove = getRankRoleIds(oldRank)
+  const roleIdsToRemove = getRankRoleIds(oldRank, config)
     .filter((roleId) => !newRoleIds.includes(roleId));
 
   const roleIdsToAdd = newRoleIds;
@@ -408,6 +414,7 @@ module.exports = {
   changeMemberRank,
   formatRoleChangeResult,
   getConfiguredDepartmentRoleIds,
+  getDepartmentMemberRoleId,
   removeConfiguredDepartmentRoles,
   validateBotCanManageRankChange,
   validateConfiguredRoleCanBeAdded
