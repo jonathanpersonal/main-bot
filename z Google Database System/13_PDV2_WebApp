@@ -36,7 +36,11 @@ function doPost(e) {
       keys: Object.keys(data || {}).sort()
     });
     var result = pdv2RouteRequest_(data, { runId: runId });
-    if (!suppressSuccessLog || !result.ok) pdv2Log_(result.ok ? 'INFO' : 'WARN', runId, 'POST_END', 'doPost completed.', { ok: result.ok, route: route });
+    var isLockBusy = result && result.code === 'LOCK_BUSY';
+    var debugLocks = pdv2Bool_(pdv2GetConfigValue_('DEBUG_LOCK_BUSY_LOGGING', 'FALSE'), false);
+    if ((!suppressSuccessLog || !result.ok) && (!isLockBusy || debugLocks)) {
+      pdv2Log_(result.ok ? 'INFO' : 'WARN', runId, 'POST_END', 'doPost completed.', { ok: result.ok, route: route, code: result.code || '' });
+    }
     return pdv2JsonOutput_(result);
   } catch (err) {
     pdv2Log_('ERROR', runId, 'POST_ERROR', String(err), { stack: err && err.stack ? String(err.stack) : '' });
@@ -79,6 +83,7 @@ function pdv2RouteRequest_(data, options) {
     return pdv2Fail_('Bot API routes are disabled in SystemConfig.');
   }
 
+  if (normalizedRoute === 'syncranksconfig' || normalizedRoute === 'sync_ranks_config') return pdv2SyncRanksConfig_(data);
   if (normalizedRoute === 'submitbotrequest') return pdv2SubmitBotRequest_(data);
   if (normalizedRoute === 'getpendingbotactions') return pdv2GetPendingBotActions_(data);
   if (normalizedRoute === 'markbotactioncomplete') return pdv2MarkBotActionComplete_(data);

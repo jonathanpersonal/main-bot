@@ -75,6 +75,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     await handleInteraction(interaction);
   } catch (error) {
+    if (isGoogleLockBusyError(error)) {
+      if (isDebugLoggingEnabled()) console.warn('Google lock busy while handling interaction:', error);
+      await sendInteractionError(interaction, 'Google is busy processing another request. Wait a moment and try again.').catch((replyError) => {
+        console.error('Could not send interaction error response:', replyError);
+      });
+      return;
+    }
     console.error('Unhandled interaction error:', error);
     await logServerError(interaction, error, { commandName: interaction.commandName, customId: interaction.customId, guildId: interaction.guildId });
     await sendInteractionError(interaction).catch((replyError) => {
@@ -146,10 +153,23 @@ async function handleInteraction(interaction) {
   try {
     await command.execute(interaction, client);
   } catch (error) {
+    if (isGoogleLockBusyError(error)) {
+      if (isDebugLoggingEnabled()) console.warn(`Google lock busy while running /${interaction.commandName}:`, error);
+      await sendInteractionError(interaction, 'Google is busy processing another request. Wait a moment and try again.');
+      return;
+    }
     console.error(`Error running /${interaction.commandName}:`, error);
     await logServerError(interaction, error, { commandName: interaction.commandName, guildId: interaction.guildId });
     await sendInteractionError(interaction);
   }
+}
+
+function isGoogleLockBusyError(error) {
+  return Boolean(error?.isGoogleLockBusy || error?.googleStatus === 423 || error?.googleCode === 'LOCK_BUSY');
+}
+
+function isDebugLoggingEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.DEBUG_LOGGING || process.env.DEBUG_GOOGLE_LOCK_BUSY || ''));
 }
 
 async function handleTicketInteraction(interaction) {
@@ -184,6 +204,11 @@ async function handleTicketInteraction(interaction) {
       return true;
     }
   } catch (error) {
+    if (isGoogleLockBusyError(error)) {
+      if (isDebugLoggingEnabled()) console.warn('Google lock busy while handling ticket interaction:', error);
+      await sendInteractionError(interaction, 'Google is busy processing another request. Wait a moment and try again.');
+      return true;
+    }
     console.error('Error handling ticket interaction:', error);
     await logServerError(interaction, error, { customId, guildId: interaction.guildId });
     await sendInteractionError(interaction);
@@ -201,6 +226,11 @@ async function handleCommandInteraction(interaction, handlerName, interactionTyp
       const wasHandled = await command[handlerName](interaction, client);
       if (wasHandled) return;
     } catch (error) {
+      if (isGoogleLockBusyError(error)) {
+        if (isDebugLoggingEnabled()) console.warn(`Google lock busy while handling ${interactionTypeLabel} interaction:`, error);
+        await sendInteractionError(interaction, 'Google is busy processing another request. Wait a moment and try again.');
+        return;
+      }
       console.error(`Error handling ${interactionTypeLabel} interaction:`, error);
       await logServerError(interaction, error, { interactionTypeLabel, customId: interaction.customId, guildId: interaction.guildId });
       await sendInteractionError(interaction);
@@ -209,11 +239,11 @@ async function handleCommandInteraction(interaction, handlerName, interactionTyp
   }
 }
 
-async function sendInteractionError(interaction) {
+async function sendInteractionError(interaction, message = 'There was an error while running this command.') {
   if (!interaction || !interaction.isRepliable?.()) return;
 
   const errorMessage = {
-    content: 'There was an error while running this command.',
+    content: message,
     flags: MessageFlags.Ephemeral
   };
 

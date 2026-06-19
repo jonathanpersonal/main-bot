@@ -26,6 +26,16 @@ class GoogleTimeoutError extends Error {
   }
 }
 
+class GoogleLockBusyError extends Error {
+  constructor(message = 'Google is busy processing another request. Wait a moment and try again.') {
+    super(message);
+    this.name = 'GoogleLockBusyError';
+    this.isGoogleLockBusy = true;
+    this.googleStatus = 423;
+    this.googleCode = 'LOCK_BUSY';
+  }
+}
+
 function stripHtml(value) {
   return String(value || '')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -57,7 +67,7 @@ function buildNonJsonGoogleError(response, text) {
   return error;
 }
 
-async function postToGoogle(route, data = {}) {
+async function postToGoogle(route, data = {}, options = {}) {
   const config = getGoogleConfig();
 
   if (!config.enabled) {
@@ -66,8 +76,13 @@ async function postToGoogle(route, data = {}) {
     );
   }
 
+  const parsedRequestTimeoutMs = Number(options.timeoutMs || config.timeoutMs);
+  const requestTimeoutMs =
+    Number.isFinite(parsedRequestTimeoutMs) && parsedRequestTimeoutMs > 0
+      ? Math.min(parsedRequestTimeoutMs, config.timeoutMs)
+      : config.timeoutMs;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
 
   try {
     const response = await fetch(config.webAppUrl, {
@@ -92,19 +107,29 @@ async function postToGoogle(route, data = {}) {
       throw buildNonJsonGoogleError(response, text);
     }
 
+    if (response.status === 423 || json.code === 'LOCK_BUSY' || json.status === 423) {
+      throw new GoogleLockBusyError();
+    }
+
     if (!response.ok) {
-      throw new Error(`Google HTTP ${response.status}: ${JSON.stringify(json)}`);
+      const error = new Error(`Google HTTP ${response.status}: ${JSON.stringify(json)}`);
+      error.googleStatus = response.status;
+      error.googleCode = json.code;
+      throw error;
     }
 
     if (!json.ok) {
-      throw new Error(json.error || 'Google returned ok=false.');
+      const error = new Error(json.message || json.error || 'Google returned ok=false.');
+      error.googleStatus = json.status;
+      error.googleCode = json.code;
+      throw error;
     }
 
     return json;
   } catch (error) {
     if (error.name === 'AbortError') {
       throw new GoogleTimeoutError(
-        `Google Apps Script did not respond within ${Math.round(config.timeoutMs / 1000)} seconds. ` +
+        `Google Apps Script did not respond within ${Math.round(requestTimeoutMs / 1000)} seconds. ` +
           'The request may still have completed in Google, so check BotRequests/BotActions before trying again.'
       );
     }
@@ -168,6 +193,7 @@ async function markBotActionFailed(actionId, errorMessage, result = {}) {
 
 module.exports = {
   GoogleTimeoutError,
+  GoogleLockBusyError,
   getGoogleConfig,
   postToGoogle,
   pingGoogle,
