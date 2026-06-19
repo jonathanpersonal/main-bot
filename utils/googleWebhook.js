@@ -119,9 +119,11 @@ async function postToGoogle(route, data = {}, options = {}) {
     }
 
     if (!json.ok) {
-      const error = new Error(json.message || json.error || 'Google returned ok=false.');
+      const detail = json.message || json.error || `Google returned ok=false: ${JSON.stringify(json)}`;
+      const error = new Error(detail);
       error.googleStatus = json.status;
       error.googleCode = json.code;
+      error.googleResponse = json;
       throw error;
     }
 

@@ -800,11 +800,17 @@ async function googleSync(interaction, config) {
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
-    const result = await postToGoogle('syncRanksConfig', payload, { timeoutMs: 55000 });
+    const result = await postRankSyncToGoogle(payload);
     const processorResult = result.result || result;
     const message = processorResult.message || result.message || '';
     if (message.includes('No specific processor exists yet')) {
       await interaction.editReply('Google received the request, but the Apps Script does not yet have a processor for SYNC_RANKS_CONFIG. Update the Google Database System and rerun the Apps Script installer.');
+      return;
+    }
+    if (processorResult.ok === false) {
+      const detail = processorResult.error || processorResult.message || 'Google returned a failed rank sync result.';
+      await logServerError(interaction, new Error(detail), { command: 'department-setup google-sync', action: 'SYNC_RANKS_CONFIG', guildId: interaction.guildId, googleResponse: result });
+      await interaction.editReply(`Google rank sync failed: ${detail.slice(0, 500)}`);
       return;
     }
     const errors = Array.isArray(processorResult.errors) ? processorResult.errors : [];
@@ -815,8 +821,37 @@ async function googleSync(interaction, config) {
       await interaction.editReply('Google is busy processing another request. Wait a moment and try again.');
       return;
     }
-    throw error;
+    const googleMessage = googleErrorMessage(error);
+    if (googleMessage.includes('No specific processor exists yet')) {
+      await interaction.editReply('Google received the request, but the Apps Script does not yet have a processor for SYNC_RANKS_CONFIG. Update the Google Database System and rerun the Apps Script installer.');
+      return;
+    }
+    if (/pdv2SyncRanksConfig_|Unknown route: syncRanksConfig|SYNC_RANKS_CONFIG/i.test(googleMessage)) {
+      await logServerError(interaction, error, { command: 'department-setup google-sync', action: 'SYNC_RANKS_CONFIG', guildId: interaction.guildId, googleResponse: error.googleResponse || null });
+      await interaction.editReply('Google rank sync failed because the deployed Apps Script does not have the current rank sync processor. Update the Google Database System, run pdv2InstallOrRepairSystem(), redeploy the Web App, then rerun this sync.');
+      return;
+    }
+    await logServerError(interaction, error, { command: 'department-setup google-sync', action: 'SYNC_RANKS_CONFIG', guildId: interaction.guildId, googleResponse: error.googleResponse || null });
+    await interaction.editReply(`Google rank sync failed: ${googleMessage.slice(0, 500)}`);
   }
+}
+
+async function postRankSyncToGoogle(payload) {
+  try {
+    return await postToGoogle('syncRanksConfig', payload, { timeoutMs: 55000 });
+  } catch (error) {
+    const message = googleErrorMessage(error);
+    if (!/Unknown route: syncRanksConfig|pdv2SyncRanksConfig_/i.test(message)) throw error;
+    return postToGoogle('submitBotRequest', payload, { timeoutMs: 55000 });
+  }
+}
+
+function googleErrorMessage(error) {
+  if (!error) return 'Unknown Google error.';
+  if (error.googleResponse) {
+    return error.googleResponse.message || error.googleResponse.error || JSON.stringify(error.googleResponse);
+  }
+  return error.message || String(error);
 }
 
 async function saveDevMode(interaction) {

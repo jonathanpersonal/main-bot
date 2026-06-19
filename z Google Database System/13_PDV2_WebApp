@@ -83,7 +83,12 @@ function pdv2RouteRequest_(data, options) {
     return pdv2Fail_('Bot API routes are disabled in SystemConfig.');
   }
 
-  if (normalizedRoute === 'syncranksconfig' || normalizedRoute === 'sync_ranks_config') return pdv2SyncRanksConfig_(data);
+  if (normalizedRoute === 'syncranksconfig' || normalizedRoute === 'sync_ranks_config') {
+    return pdv2SubmitBotRequest_(Object.assign({}, data, {
+      action: 'SYNC_RANKS_CONFIG',
+      actionType: 'SYNC_RANKS_CONFIG'
+    }));
+  }
   if (normalizedRoute === 'submitbotrequest') return pdv2SubmitBotRequest_(data);
   if (normalizedRoute === 'getpendingbotactions') return pdv2GetPendingBotActions_(data);
   if (normalizedRoute === 'markbotactioncomplete') return pdv2MarkBotActionComplete_(data);

@@ -232,6 +232,10 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
       return pdv2RegisterOfficerFromBotRequest_(requestId, data);
     }
 
+    if (actionType === 'SYNC_RANKS_CONFIG') {
+      return pdv2SyncRanksConfig_(data, requestId);
+    }
+
     if (actionType === 'GOOGLE_TEST' || actionType === 'TEST' || actionType === 'TEST_GOOGLE_POST') {
       var testAction = pdv2CreateBotAction_({
         requestId: requestId,
