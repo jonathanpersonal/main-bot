@@ -830,7 +830,8 @@ async function confirmRankChange({
     interaction.guild,
     botMember,
     currentRank,
-    targetRank
+    targetRank,
+    serverConfig
   );
 
   if (!roleValidation.canManage) {
@@ -852,7 +853,8 @@ async function confirmRankChange({
     officerMember,
     currentRank,
     targetRank,
-    auditReason
+    auditReason,
+    serverConfig
   );
 
   await sendOfficerRankChangeLog({

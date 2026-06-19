@@ -41,19 +41,34 @@ function roleGroups(config = {}) {
   const p = config.permissions || {};
   const t = config.training || config.trainingManagement || {};
   const pr = config.probation || {};
+  const ranks = Array.isArray(config.ranks) ? config.ranks : [];
+  const departmentAdminStaffRoleIds = cleanRoleIds([
+    ...(p.deptAdminStaffRoleIds || []),
+    ...(p.departmentAdminStaffRoleIds || []),
+    ...ranks.filter((rank) => rank.isDepartmentAdminStaff).flatMap((rank) => [rank.rankRoleId, rank.permissionRoleId])
+  ]);
+  const supervisorInTrainingRoleIds = cleanRoleIds([
+    ...(p.supervisorInTrainingRoleIds || []),
+    ...ranks.filter((rank) => rank.isSupervisorInTraining).flatMap((rank) => [rank.rankRoleId, rank.permissionRoleId])
+  ]);
 
   return {
     botAdmin: cleanRoleIds([
       ...(p.botAdminRoleIds || []),
-      ...(p.setupAdminRoleIds || [])
+      ...(p.setupAdminRoleIds || []),
+      ...departmentAdminStaffRoleIds
     ]),
 
-    setupAdmin: cleanRoleIds([...(p.setupAdminRoleIds || [])]),
-    commandStaff: cleanRoleIds(p.commandStaffRoleIds || []),
-    highCommand: cleanRoleIds(p.highCommandRoleIds || []),
-    supervisor: cleanRoleIds(p.supervisorRoleIds || []),
+    setupAdmin: cleanRoleIds([...(p.setupAdminRoleIds || []), ...departmentAdminStaffRoleIds]),
+    commandStaff: cleanRoleIds([...(p.commandStaffRoleIds || []), ...departmentAdminStaffRoleIds]),
+    highCommand: cleanRoleIds([...(p.highCommandRoleIds || []), ...departmentAdminStaffRoleIds]),
+    departmentAdminStaff: departmentAdminStaffRoleIds,
+    supervisor: cleanRoleIds([...(p.supervisorRoleIds || []), ...departmentAdminStaffRoleIds]),
+    supervisorInTraining: cleanRoleIds([...supervisorInTrainingRoleIds, ...departmentAdminStaffRoleIds]),
 
     trainingOfficer: cleanRoleIds([
+      ...departmentAdminStaffRoleIds,
+      ...supervisorInTrainingRoleIds,
       ...(p.trainingOfficerRoleIds || []),
       ...(p.trainingStaffRoleIds || []),
       ...(t.trainingOfficerRoleIds || []),
@@ -63,31 +78,35 @@ function roleGroups(config = {}) {
     ]),
 
     trainingCommand: cleanRoleIds([
+      ...departmentAdminStaffRoleIds,
       ...(p.trainingCommandRoleIds || []),
       ...(t.trainingCommandRoleIds || []),
       ...(t.ftoCommandRoleIds || []),
+      ...departmentAdminStaffRoleIds,
       ...(p.ftoCommandRoleIds || []),
       ...(pr.ftoCommandRoleIds || [])
     ]),
 
     ftoCommand: cleanRoleIds([
+      ...departmentAdminStaffRoleIds,
       ...(p.ftoCommandRoleIds || []),
       ...(pr.ftoCommandRoleIds || []),
       ...(t.ftoCommandRoleIds || [])
     ]),
 
     departmentCommand: cleanRoleIds([
+      ...departmentAdminStaffRoleIds,
       ...(p.departmentCommandRoleIds || []),
       ...(pr.departmentCommandRoleIds || []),
       ...(p.commandStaffRoleIds || [])
     ]),
 
-    ticketStaff: cleanRoleIds([...(p.ticketStaffRoleIds || [])]),
-    iaStaff: cleanRoleIds([...(p.iaStaffRoleIds || [])]),
-    lookup: cleanRoleIds([...(p.lookupRoleIds || [])]),
-    sync: cleanRoleIds([...(p.syncRoleIds || [])]),
-    manualOfficerUpdate: cleanRoleIds([...(p.manualOfficerUpdateRoleIds || [])]),
-    importUsers: cleanRoleIds([...(p.importUsersRoleIds || [])])
+    ticketStaff: cleanRoleIds([...(p.ticketStaffRoleIds || []), ...departmentAdminStaffRoleIds]),
+    iaStaff: cleanRoleIds([...(p.iaStaffRoleIds || []), ...departmentAdminStaffRoleIds]),
+    lookup: cleanRoleIds([...(p.lookupRoleIds || []), ...departmentAdminStaffRoleIds]),
+    sync: cleanRoleIds([...(p.syncRoleIds || []), ...departmentAdminStaffRoleIds]),
+    manualOfficerUpdate: cleanRoleIds([...(p.manualOfficerUpdateRoleIds || []), ...departmentAdminStaffRoleIds]),
+    importUsers: cleanRoleIds([...(p.importUsersRoleIds || []), ...departmentAdminStaffRoleIds])
   };
 }
 
@@ -104,67 +123,67 @@ function memberHasPermissionGroup(member, config, groups = [], fallbackPermissio
 
 const permissionMap = {
   setupAdmin: {
-    groups: ['setupAdmin', 'botAdmin'],
+    groups: ['setupAdmin', 'departmentAdminStaff', 'botAdmin'],
     fallback: PermissionFlagsBits.Administrator
   },
 
   botAdmin: {
-    groups: ['botAdmin'],
+    groups: ['departmentAdminStaff', 'botAdmin'],
     fallback: PermissionFlagsBits.Administrator
   },
 
   commandStaff: {
-    groups: ['commandStaff', 'highCommand', 'botAdmin'],
+    groups: ['commandStaff', 'departmentAdminStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   highCommand: {
-    groups: ['highCommand', 'botAdmin'],
+    groups: ['departmentAdminStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.Administrator
   },
 
   supervisor: {
-    groups: ['supervisor', 'commandStaff', 'highCommand', 'botAdmin'],
+    groups: ['supervisor', 'departmentAdminStaff', 'commandStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   trainingOfficer: {
-    groups: ['trainingOfficer', 'trainingCommand', 'commandStaff', 'highCommand', 'botAdmin'],
+    groups: ['trainingOfficer', 'supervisorInTraining', 'departmentAdminStaff', 'trainingCommand', 'commandStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   ftoCommand: {
-    groups: ['ftoCommand', 'departmentCommand', 'commandStaff', 'highCommand', 'botAdmin'],
+    groups: ['ftoCommand', 'departmentAdminStaff', 'departmentCommand', 'commandStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   departmentCommand: {
-    groups: ['departmentCommand', 'highCommand', 'botAdmin'],
+    groups: ['departmentAdminStaff', 'departmentCommand', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   lookup: {
-    groups: ['lookup', 'supervisor', 'trainingOfficer', 'trainingCommand', 'commandStaff', 'highCommand', 'botAdmin'],
+    groups: ['lookup', 'supervisor', 'supervisorInTraining', 'trainingOfficer', 'departmentAdminStaff', 'trainingCommand', 'commandStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   sync: {
-    groups: ['sync', 'commandStaff', 'highCommand', 'botAdmin'],
+    groups: ['sync', 'departmentAdminStaff', 'commandStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageRoles
   },
 
   manualOfficerUpdate: {
-    groups: ['manualOfficerUpdate', 'highCommand', 'botAdmin'],
+    groups: ['manualOfficerUpdate', 'departmentAdminStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.Administrator
   },
 
   importUsers: {
-    groups: ['importUsers', 'highCommand', 'botAdmin'],
+    groups: ['importUsers', 'departmentAdminStaff', 'highCommand', 'botAdmin'],
     fallback: PermissionFlagsBits.Administrator
   },
 
   ticketStaff: {
-    groups: ['ticketStaff', 'botAdmin'],
+    groups: ['ticketStaff', 'departmentAdminStaff', 'botAdmin'],
     fallback: PermissionFlagsBits.ManageChannels
   }
 };
@@ -304,6 +323,7 @@ const isSetupAdmin = (member, config) => canUseCommand(member, config, 'setupAdm
 const isBotAdmin = (member, config) => canUseCommand(member, config, 'botAdmin');
 const isCommandStaff = (member, config) => canUseCommand(member, config, 'commandStaff');
 const isHighCommand = (member, config) => canUseCommand(member, config, 'highCommand');
+const isDepartmentAdminStaff = (member, config) => canUseCommand(member, config, 'botAdmin');
 const isSupervisor = (member, config) => canUseCommand(member, config, 'supervisor');
 const isTrainingOfficer = (member, config) => canUseCommand(member, config, 'trainingOfficer');
 const isFtoCommand = (member, config) => canUseCommand(member, config, 'ftoCommand');
@@ -331,6 +351,7 @@ module.exports = {
   isBotAdmin,
   isCommandStaff,
   isHighCommand,
+  isDepartmentAdminStaff,
   isSupervisor,
   isTrainingOfficer,
   isFtoCommand,

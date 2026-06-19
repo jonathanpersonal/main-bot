@@ -20,8 +20,12 @@ module.exports = {
     const permissionRoles = [
       ...(config.permissions?.commandStaffRoleIds || []),
       ...(config.permissions?.supervisorRoleIds || []),
+      ...(config.permissions?.supervisorInTrainingRoleIds || []),
+      ...(config.permissions?.deptAdminStaffRoleIds || []),
+      ...(config.permissions?.departmentAdminStaffRoleIds || []),
       ...(config.permissions?.trainingStaffRoleIds || []),
       ...(config.permissions?.ticketStaffRoleIds || []),
+      config.department?.memberRoleId || config.roles?.departmentMemberRoleId,
       ...((config.ranks || []).map((rank) => rank.permissionRoleId).filter(Boolean))
     ];
     const logChannels = Object.values(config.channels || {}).filter(Boolean);
@@ -36,6 +40,7 @@ module.exports = {
       statusLine(Boolean(config.departmentName || config.department?.name), 'Department name', config.departmentName || config.department?.name || 'Missing'),
       statusLine(fs.existsSync(configPath), 'Guild config file', fs.existsSync(configPath) ? `Found \`${configPath}\`` : `Missing data/guildConfigs/${interaction.guildId}.json; using defaults/fallbacks`),
       statusLine(rankRoles.length > 0, 'Rank roles', rankRoles.length ? `${rankRoles.length} configured` : 'No rank roles configured'),
+      statusLine(Boolean(config.department?.memberRoleId || config.roles?.departmentMemberRoleId), 'Department member role', config.department?.memberRoleId || config.roles?.departmentMemberRoleId ? 'Configured' : 'Missing'),
       statusLine(permissionRoles.length > 0, 'Permission roles', permissionRoles.length ? `${permissionRoles.length} configured` : 'No permission roles configured'),
       statusLine(logChannels.length > 0, 'Log channels', logChannels.length ? `${logChannels.length} configured` : 'No log channels configured'),
       statusLine(!ticketsEnabled || ticketTypes.length > 0, 'Tickets', ticketsEnabled ? `${ticketTypes.length} enabled ticket type(s)` : 'Disabled'),
