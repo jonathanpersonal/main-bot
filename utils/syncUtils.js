@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { getConfiguredRanks, getMemberRank } = require('./rankUtils');
-const { applyConfiguredRoleChanges, getConfiguredDepartmentRoleIds } = require('./roleUtils');
+const { applyConfiguredRoleChanges, getConfiguredDepartmentRoleIds, getDepartmentMemberRoleId } = require('./roleUtils');
 
 function norm(v) { return String(v || '').trim(); }
 function findRank(config, officer = {}) {
@@ -8,7 +8,7 @@ function findRank(config, officer = {}) {
   const name = norm(officer.rank).toLowerCase();
   return getConfiguredRanks(config).find((r) => norm(r.key || r.rankKey || r.name).toLowerCase() === key || norm(r.name).toLowerCase() === name) || null;
 }
-function rankRoleIds(rank) { return [rank?.rankRoleId, rank?.permissionRoleId].filter(Boolean); }
+function rankRoleIds(rank, config = null) { return [rank?.rankRoleId, rank?.permissionRoleId, getDepartmentMemberRoleId(config)].filter(Boolean); }
 function getConfiguredDepartmentRoles(config) { return getConfiguredDepartmentRoleIds(config); }
 function formatNickname(format, officer, member) { return (format || '{callsign} | {name}').replace('{callsign}', officer.callsign || '').replace('{name}', officer.dbName || officer.discordUsername || member.user.username).replace(/^[\s|.-]+|[\s|.-]+$/g, '').slice(0, 32); }
 
@@ -17,9 +17,9 @@ function compareOfficerState(member, googleOfficer = {}, config = {}) {
   const targetRank = findRank(config, googleOfficer);
   const warnings = [];
   if (!targetRank) warnings.push(`Missing rank mapping for Google rank: ${googleOfficer.rankKey || googleOfficer.rank || 'blank'}`);
-  const allRankRoles = getConfiguredRanks(config).flatMap(rankRoleIds);
-  const removeRoleIds = config.sync?.removeOldRankRoles === false ? [] : allRankRoles.filter((id) => member.roles.cache.has(id) && !rankRoleIds(targetRank).includes(id));
-  const addRoleIds = targetRank ? rankRoleIds(targetRank).filter((id) => !member.roles.cache.has(id)) : [];
+  const allRankRoles = getConfiguredRanks(config).flatMap((rank) => rankRoleIds(rank, config));
+  const removeRoleIds = config.sync?.removeOldRankRoles === false ? [] : allRankRoles.filter((id) => member.roles.cache.has(id) && !rankRoleIds(targetRank, config).includes(id));
+  const addRoleIds = targetRank ? rankRoleIds(targetRank, config).filter((id) => !member.roles.cache.has(id)) : [];
   const nicknameEnabled = config.sync?.updateNickname !== false;
   const targetNickname = nicknameEnabled ? formatNickname(config.sync?.nicknameFormat, googleOfficer, member) : '';
   const nicknameChange = nicknameEnabled && targetNickname && member.manageable && member.displayName !== targetNickname ? { from: member.displayName, to: targetNickname } : null;

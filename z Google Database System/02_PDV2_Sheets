@@ -99,7 +99,7 @@ function pdv2ApplySheetControls_(sh) {
   if (!sh || sh.getName() !== PDV2.SHEETS.RANKS) return;
 
   var map = pdv2HeaderMap_(sh);
-  ['Activity Exempt', 'Activity Cadet'].forEach(function(header) {
+  ['Activity Exempt', 'Activity Cadet', 'Command Staff', 'Supervisor', 'Supervisor In Training', 'Dept Admin Staff', 'Probationary', 'Recruit'].forEach(function(header) {
     var column = map[header];
     if (!column) return;
 
