@@ -159,9 +159,19 @@ function pdv2ValidateGuildIfConfigured_(data) {
   };
 }
 
-function pdv2WithLock_(callback) {
+function pdv2LockBusyResponse_() {
+  return {
+    ok: false,
+    status: 423,
+    code: 'LOCK_BUSY',
+    message: 'Google database is busy. Please try again in a moment.'
+  };
+}
+
+function pdv2WithLock_(callback, waitMs) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  var acquired = lock.tryLock(waitMs === undefined ? 5000 : waitMs);
+  if (!acquired) return pdv2LockBusyResponse_();
   try {
     return callback();
   } finally {

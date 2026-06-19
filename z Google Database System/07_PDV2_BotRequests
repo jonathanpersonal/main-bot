@@ -42,9 +42,11 @@ function pdv2SubmitBotRequest_(data) {
     'Completed At': ''
   };
 
-  pdv2WithLock_(function() {
+  var lockResult = pdv2WithLock_(function() {
     pdv2AppendObject_(PDV2.SHEETS.BOT_REQUESTS, row);
+    return pdv2Success_({ appended: true });
   });
+  if (lockResult && lockResult.code === 'LOCK_BUSY') return lockResult;
   pdv2Audit_(row.Source, 'BOT_REQUEST_RECEIVED', actor, 'BotRequests', requestId, requestId, {
     actionType: actionType,
     targetDiscordId: targetDiscordId
@@ -366,6 +368,7 @@ function pdv2GetRequestStatus_(requestId) {
 
 
 function pdv2SyncRanksConfig_(data) {
+  return pdv2WithLock_(function() {
   var ranks = data.ranks || (data.payload && data.payload.ranks) || [];
   if (!Array.isArray(ranks)) ranks = [];
   pdv2EnsureSheet_(PDV2.SHEETS.RANKS);
@@ -427,4 +430,6 @@ function pdv2SyncRanksConfig_(data) {
     }
   });
   return { ok: true, action: 'SYNC_RANKS_CONFIG', added: added, updated: updated, skipped: skipped, errors: errors };
+
+  }, 5000);
 }

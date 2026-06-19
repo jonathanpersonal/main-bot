@@ -166,9 +166,11 @@ function pdv2SubmitBotRequest_(data) {
     'Completed At': ''
   };
 
-  pdv2WithLock_(function() {
+  var lockResult = pdv2WithLock_(function() {
     pdv2AppendObject_(PDV2.SHEETS.BOT_REQUESTS, row);
+    return pdv2Success_({ appended: true });
   });
+  if (lockResult && lockResult.code === 'LOCK_BUSY') return lockResult;
   pdv2Audit_(row.Source, 'BOT_REQUEST_RECEIVED', actor, 'BotRequests', requestId, requestId, {
     actionType: actionType,
     targetDiscordId: targetDiscordId

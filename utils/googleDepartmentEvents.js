@@ -68,13 +68,16 @@ async function safeSubmitDepartmentEvent(options = {}) {
   try {
     return await submitDepartmentEvent(options);
   } catch (error) {
-    console.warn(`Google department event failed for ${options.actionType || 'unknown action'}:`, error);
     if (error?.isGoogleTimeout) {
       return { ok: false, pending: true, error };
     }
-    if (/Lock timeout/i.test(error?.message || '')) {
+    if (error?.isGoogleLockBusy || error?.googleStatus === 423 || error?.googleCode === 'LOCK_BUSY' || /Lock timeout/i.test(error?.message || '')) {
+      if (/^(1|true|yes|on)$/i.test(String(process.env.DEBUG_LOGGING || process.env.DEBUG_GOOGLE_LOCK_BUSY || ''))) {
+        console.warn(`Google department event lock busy for ${options.actionType || 'unknown action'}:`, error);
+      }
       return { ok: false, busy: true, error };
     }
+    console.warn(`Google department event failed for ${options.actionType || 'unknown action'}:`, error);
     return { ok: false, error };
   }
 }

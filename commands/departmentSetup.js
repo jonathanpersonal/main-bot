@@ -787,8 +787,16 @@ async function googleSync(interaction, config) {
   };
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const result = await postToGoogle('submitBotRequest', payload);
-  await interaction.editReply(`Rank sync complete.\nAdded: ${result.added ?? result.result?.added ?? 0}\nUpdated: ${result.updated ?? result.result?.updated ?? 0}\nSkipped: ${result.skipped ?? result.result?.skipped ?? 0}`);
+  try {
+    const result = await postToGoogle('syncRanksConfig', payload, { timeoutMs: 55000 });
+    await interaction.editReply(`Rank sync complete.\nAdded: ${result.added ?? result.result?.added ?? 0}\nUpdated: ${result.updated ?? result.result?.updated ?? 0}\nSkipped: ${result.skipped ?? result.result?.skipped ?? 0}`);
+  } catch (error) {
+    if (error?.isGoogleLockBusy || error?.googleStatus === 423 || error?.googleCode === 'LOCK_BUSY') {
+      await interaction.editReply('Google is busy processing another request. Wait a moment and try again.');
+      return;
+    }
+    throw error;
+  }
 }
 
 async function saveDevMode(interaction) {
