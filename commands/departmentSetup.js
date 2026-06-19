@@ -19,6 +19,23 @@ const { logServerError } = require('../utils/errorLogUtils');
 
 const CUSTOM_ID_PREFIX = 'department-setup';
 
+const standardRankSyncDefaults = [
+  { key: 'chief', name: 'Chief of Police', order: 1, assignCallsign: false, isCommandStaff: true, isDepartmentAdminStaff: true, isActivityExempt: true },
+  { key: 'deputy_chief', name: 'Deputy Chief', order: 2, assignCallsign: false, isCommandStaff: true, isDepartmentAdminStaff: true, isActivityExempt: true },
+  { key: 'commander', name: 'Commander', order: 3, assignCallsign: false, isCommandStaff: true, isDepartmentAdminStaff: true, isActivityExempt: true },
+  { key: 'captain', name: 'Captain', order: 4, assignCallsign: false, isCommandStaff: true, isSupervisor: true },
+  { key: 'lieutenant', name: 'Lieutenant', order: 5, assignCallsign: true, isCommandStaff: true, isSupervisor: true },
+  { key: 'master_sergeant', name: 'Master Sergeant', order: 6, assignCallsign: true, isSupervisor: true },
+  { key: 'sergeant', name: 'Sergeant', order: 7, assignCallsign: true, isSupervisor: true },
+  { key: 'corporal', name: 'Corporal', order: 8, assignCallsign: true, isSupervisorInTraining: true },
+  { key: 'lead_officer', name: 'Lead Officer', order: 9, assignCallsign: true },
+  { key: 'senior_officer', name: 'Senior Officer', order: 10, assignCallsign: true },
+  { key: 'officer_ii', name: 'Officer II', order: 11, assignCallsign: true },
+  { key: 'officer_i', name: 'Officer I', order: 12, assignCallsign: true },
+  { key: 'probationary_officer', name: 'Probationary Officer', order: 13, assignCallsign: true, isProbationary: true },
+  { key: 'cadet', name: 'Cadet', order: 14, assignCallsign: false, isActivityCadet: true }
+];
+
 const roleTypeMap = {
   'setup-admin': ['permissions', 'setupAdminRoleIds'],
   'command-staff': ['permissions', 'commandStaffRoleIds'],
@@ -655,6 +672,30 @@ function slugifyRankKey(name) {
   return normalizeRankKey(name);
 }
 
+function buildGoogleRankSyncRows(config, departmentKey) {
+  const ranksByKeyAndDepartment = new Map();
+  const putRank = (rank, preferExisting) => {
+    const normalized = createDefaultRank({
+      ...rank,
+      key: normalizeRankKey(rank.key || rank.rankKey, rank.name),
+      department: rank.department || departmentKey || 'main',
+      active: rank.active !== false
+    });
+    const mapKey = `${normalized.key.toLowerCase()}|${String(normalized.department || 'main').toLowerCase()}`;
+    if (!preferExisting || !ranksByKeyAndDepartment.has(mapKey)) ranksByKeyAndDepartment.set(mapKey, normalized);
+  };
+
+  standardRankSyncDefaults.forEach((rank) => putRank({
+    ...rank,
+    department: departmentKey,
+    notes: 'Default department rank. Edit role IDs/config for this server.'
+  }, true));
+  (config.ranks || []).forEach((rank) => putRank(rank, false));
+
+  return Array.from(ranksByKeyAndDepartment.values())
+    .sort((a, b) => (a.order ?? a.level ?? 0) - (b.order ?? b.level ?? 0));
+}
+
 async function listRanks(interaction, config) {
   if (!config.ranks.length) return interaction.reply({ content: 'No ranks are configured yet.', flags: MessageFlags.Ephemeral });
 
@@ -774,7 +815,7 @@ async function googleSync(interaction, config) {
     guildId: interaction.guildId,
     departmentKey,
     departmentName: config.department?.name || config.departmentName || interaction.guild?.name || '',
-    ranks: (config.ranks || []).map((rank) => ({
+    ranks: buildGoogleRankSyncRows(config, departmentKey).map((rank) => ({
       rankKey: normalizeRankKey(rank.key || rank.rankKey, rank.name),
       rankName: rank.name,
       rankOrder: rank.order ?? rank.level ?? 0,

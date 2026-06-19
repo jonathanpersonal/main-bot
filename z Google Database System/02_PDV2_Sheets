@@ -24,6 +24,7 @@ function pdv2EnsureSheet_(sheetName) {
   var sh = pdv2GetSheet_(sheetName);
   var headers = pdv2HeadersForSheet_(sheetName);
   if (headers.length) pdv2EnsureHeaders_(sh, headers);
+  if (sheetName === PDV2.SHEETS.RANKS) pdv2RepairRanksHeaderAliases_(sh);
   pdv2ApplySheetControls_(sh);
   pdv2FormatSheet_(sh);
   return sh;
@@ -93,6 +94,54 @@ function pdv2DeleteEmptyHeaderGapColumns_(sh) {
   });
 
   return ranges.reduce(function(total, range) { return total + range[1]; }, 0);
+}
+
+function pdv2RepairRanksHeaderAliases_(sh) {
+  if (!sh || sh.getName() !== PDV2.SHEETS.RANKS) return { changed: false };
+
+  var map = pdv2HeaderMap_(sh);
+  var legacyHeader = 'Dept Admin Staff';
+  var canonicalHeader = 'Department Admin Staff';
+  var legacyCol = map[legacyHeader];
+  var canonicalCol = map[canonicalHeader];
+  if (!legacyCol) return { changed: false };
+
+  if (!canonicalCol) {
+    sh.getRange(1, legacyCol).setValue(canonicalHeader);
+    return { changed: true, renamed: true };
+  }
+
+  var lastRow = sh.getLastRow();
+  var canDeleteLegacy = true;
+  if (lastRow >= 2) {
+    var legacyValues = sh.getRange(2, legacyCol, lastRow - 1, 1).getValues();
+    var canonicalValues = sh.getRange(2, canonicalCol, lastRow - 1, 1).getValues();
+    for (var i = 0; i < legacyValues.length; i++) {
+      var legacyValue = legacyValues[i][0];
+      var canonicalValue = canonicalValues[i][0];
+      var legacyText = pdv2String_(legacyValue);
+      var canonicalText = pdv2String_(canonicalValue);
+
+      if (legacyText && !canonicalText) {
+        canonicalValues[i][0] = legacyValue;
+        canonicalText = legacyText;
+      }
+
+      if (legacyText && canonicalText && legacyText.toLowerCase() !== canonicalText.toLowerCase()) {
+        canDeleteLegacy = false;
+      }
+    }
+
+    sh.getRange(2, canonicalCol, canonicalValues.length, 1).setValues(canonicalValues);
+  }
+
+  if (canDeleteLegacy) {
+    sh.deleteColumn(legacyCol);
+    return { changed: true, deletedLegacy: true };
+  }
+
+  sh.getRange(1, legacyCol).setValue('Dept Admin Staff (legacy)');
+  return { changed: true, keptLegacy: true };
 }
 
 function pdv2ApplySheetControls_(sh) {

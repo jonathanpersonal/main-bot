@@ -132,15 +132,20 @@ function pdv2SeedStarterConfig_() {
   }
 
   var starterRanks = [
-    ['cadet', 'Cadet', 10, 'FALSE'],
-    ['probationary_officer', 'Probationary Officer', 20, 'TRUE'],
-    ['officer_i', 'Officer I', 30, 'TRUE'],
-    ['officer_ii', 'Officer II', 40, 'TRUE'],
-    ['corporal', 'Corporal', 50, 'TRUE'],
-    ['sergeant', 'Sergeant', 60, 'TRUE'],
-    ['lieutenant', 'Lieutenant', 70, 'TRUE'],
-    ['captain', 'Captain', 80, 'TRUE'],
-    ['chief', 'Chief', 90, 'FALSE']
+    { key: 'chief', name: 'Chief of Police', order: 1, callsign: 'FALSE', command: 'TRUE', supervisor: 'TRUE', admin: 'TRUE', exempt: 'TRUE' },
+    { key: 'deputy_chief', name: 'Deputy Chief', order: 2, callsign: 'FALSE', command: 'TRUE', supervisor: 'TRUE', admin: 'TRUE', exempt: 'TRUE' },
+    { key: 'commander', name: 'Commander', order: 3, callsign: 'FALSE', command: 'TRUE', supervisor: 'TRUE', admin: 'TRUE', exempt: 'TRUE' },
+    { key: 'captain', name: 'Captain', order: 4, callsign: 'FALSE', command: 'TRUE', supervisor: 'TRUE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'lieutenant', name: 'Lieutenant', order: 5, callsign: 'TRUE', command: 'TRUE', supervisor: 'TRUE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'master_sergeant', name: 'Master Sergeant', order: 6, callsign: 'TRUE', command: 'FALSE', supervisor: 'TRUE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'sergeant', name: 'Sergeant', order: 7, callsign: 'TRUE', command: 'FALSE', supervisor: 'TRUE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'corporal', name: 'Corporal', order: 8, callsign: 'TRUE', command: 'FALSE', supervisor: 'FALSE', supervisorTraining: 'TRUE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'lead_officer', name: 'Lead Officer', order: 9, callsign: 'TRUE', command: 'FALSE', supervisor: 'FALSE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'senior_officer', name: 'Senior Officer', order: 10, callsign: 'TRUE', command: 'FALSE', supervisor: 'FALSE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'officer_ii', name: 'Officer II', order: 11, callsign: 'TRUE', command: 'FALSE', supervisor: 'FALSE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'officer_i', name: 'Officer I', order: 12, callsign: 'TRUE', command: 'FALSE', supervisor: 'FALSE', admin: 'FALSE', exempt: 'FALSE' },
+    { key: 'probationary_officer', name: 'Probationary Officer', order: 13, callsign: 'TRUE', command: 'FALSE', supervisor: 'FALSE', admin: 'FALSE', exempt: 'FALSE', probationary: 'TRUE' },
+    { key: 'cadet', name: 'Cadet', order: 14, callsign: 'FALSE', command: 'FALSE', supervisor: 'FALSE', admin: 'FALSE', exempt: 'FALSE', cadet: 'TRUE' }
   ];
 
   var existingRankKeys = {};
@@ -150,20 +155,27 @@ function pdv2SeedStarterConfig_() {
 
   var missingRankRows = [];
   starterRanks.forEach(function(rank) {
-    if (!existingRankKeys[pdv2String_(rank[0])]) {
+    if (!existingRankKeys[pdv2String_(rank.key)]) {
       missingRankRows.push({
-        'Rank Key': rank[0],
-        'Rank Name': rank[1],
-        'Rank Order': rank[2],
+        'Rank Key': rank.key,
+        'Rank Name': rank.name,
+        'Rank Order': rank.order,
         'Department': deptKey,
-        'Assign Callsign': rank[3],
+        'Assign Callsign': rank.callsign,
         'Active': 'TRUE',
         'Discord Role ID': '',
         'Permission Role ID': '',
         'Activity Active Hours': '',
         'Activity Semi Active Hours': '',
-        'Activity Exempt': '',
-        'Activity Cadet': '',
+        'Activity Exempt': rank.exempt || 'FALSE',
+        'Activity Cadet': rank.cadet || 'FALSE',
+        'Command Staff': rank.command || 'FALSE',
+        'Supervisor': rank.supervisor || 'FALSE',
+        'Supervisor In Training': rank.supervisorTraining || 'FALSE',
+        'Department Admin Staff': rank.admin || 'FALSE',
+        'Probationary': rank.probationary || 'FALSE',
+        'Recruit': 'FALSE',
+        'Minimum Days In Rank': 0,
         'Notes': 'Starter rank. Edit role IDs/config for each copied server.',
         'Updated At': pdv2Now_()
       });
