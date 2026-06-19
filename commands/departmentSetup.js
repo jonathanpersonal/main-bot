@@ -22,17 +22,12 @@ const roleTypeMap = {
   'setup-admin': ['permissions', 'setupAdminRoleIds'],
   'command-staff': ['permissions', 'commandStaffRoleIds'],
   supervisor: ['permissions', 'supervisorRoleIds'],
-  'supervisor-in-training': ['permissions', 'supervisorInTrainingRoleIds'],
   'training-staff': ['permissions', 'trainingStaffRoleIds'],
   'ia-staff': ['permissions', 'iaStaffRoleIds'],
   'ticket-staff': ['permissions', 'ticketStaffRoleIds'],
   'high-command': ['permissions', 'highCommandRoleIds'],
-  'dept-admin-staff': ['permissions', 'deptAdminStaffRoleIds'],
-  'department-admin-staff': ['permissions', 'deptAdminStaffRoleIds'],
   'previous-officer': ['department', 'previousOfficerRoleId'],
-  member: ['department', 'memberRoleId'],
-  'department-member': ['department', 'memberRoleId'],
-  'officer-member': ['department', 'memberRoleId']
+  member: ['department', 'memberRoleId']
 };
 
 const channelTypeMap = {
@@ -67,14 +62,11 @@ module.exports = {
         { name: 'setup-admin', value: 'setup-admin' },
         { name: 'command-staff', value: 'command-staff' },
         { name: 'supervisor', value: 'supervisor' },
-        { name: 'supervisor-in-training', value: 'supervisor-in-training' },
         { name: 'training-staff', value: 'training-staff' },
         { name: 'ia-staff', value: 'ia-staff' },
         { name: 'ticket-staff', value: 'ticket-staff' },
         { name: 'high-command', value: 'high-command' },
-        { name: 'dept-admin-staff', value: 'dept-admin-staff' },
         { name: 'previous-officer', value: 'previous-officer' },
-        { name: 'department-member', value: 'department-member' },
         { name: 'member', value: 'member' }))
       .addRoleOption((option) => option.setName('role').setDescription('Role to save.').setRequired(true)))
     .addSubcommand((subcommand) => subcommand
@@ -109,9 +101,7 @@ module.exports = {
       .addBooleanOption((option) => option.setName('activity-cadet').setDescription('Treat this rank as cadet/new officer for activity?'))
       .addStringOption((option) => option.setName('notes').setDescription('Optional notes.'))
       .addBooleanOption((option) => option.setName('command-staff').setDescription('Is command staff?'))
-      .addBooleanOption((option) => option.setName('supervisor').setDescription('Is full supervisor?'))
-      .addBooleanOption((option) => option.setName('supervisor-in-training').setDescription('Is Supervisor in Training / Training Staff?'))
-      .addBooleanOption((option) => option.setName('dept-admin-staff').setDescription('Is department admin staff with all bot permissions?'))
+      .addBooleanOption((option) => option.setName('supervisor').setDescription('Is supervisor?'))
       .addBooleanOption((option) => option.setName('probationary').setDescription('Is probationary?'))
       .addBooleanOption((option) => option.setName('recruit').setDescription('Is recruit?'))
       .addIntegerOption((option) => option.setName('minimum-days').setDescription('Minimum days required in the previous rank to be promoted into this rank.')))
@@ -134,9 +124,7 @@ module.exports = {
       .addBooleanOption((option) => option.setName('activity-cadet').setDescription('Treat this rank as cadet/new officer for activity?'))
       .addStringOption((option) => option.setName('notes').setDescription('Optional notes.'))
       .addBooleanOption((option) => option.setName('command-staff').setDescription('Is command staff?'))
-      .addBooleanOption((option) => option.setName('supervisor').setDescription('Is full supervisor?'))
-      .addBooleanOption((option) => option.setName('supervisor-in-training').setDescription('Is Supervisor in Training / Training Staff?'))
-      .addBooleanOption((option) => option.setName('dept-admin-staff').setDescription('Is department admin staff with all bot permissions?'))
+      .addBooleanOption((option) => option.setName('supervisor').setDescription('Is supervisor?'))
       .addBooleanOption((option) => option.setName('probationary').setDescription('Is probationary?'))
       .addBooleanOption((option) => option.setName('recruit').setDescription('Is recruit?'))
       .addIntegerOption((option) => option.setName('minimum-days').setDescription('Minimum days required in the previous rank to be promoted into this rank.')))
@@ -334,14 +322,12 @@ async function showStatus(interaction, config) {
   const hasProfile = Boolean(config.department.name && config.department.acronym);
   const hasRanks = config.ranks.length > 0;
   const hasPermissionRoles = Object.values(config.permissions).some((ids) => Array.isArray(ids) && ids.length > 0);
-  const hasDepartmentMemberRole = Boolean(config.department?.memberRoleId || config.roles?.departmentMemberRoleId);
   const hasLogChannels = Object.values(config.channels).some(Boolean);
   const hasTicketTypes = config.tickets.types.length > 0;
 
   if (!hasProfile) warnings.push('Set the department profile.');
   if (!hasRanks) warnings.push('Add at least one rank.');
   if (!hasPermissionRoles) warnings.push('Add setup/admin and staff permission roles.');
-  if (!hasDepartmentMemberRole) warnings.push('Add the department-member role so every officer receives the shared department-wide permission role.');
   if (!hasLogChannels) warnings.push('Set log channels.');
   if (config.google.enabled && !config.google.webhookUrl) warnings.push('Google is enabled but webhook URL is not set.');
 
@@ -352,7 +338,6 @@ async function showStatus(interaction, config) {
       { name: 'Department profile', value: yesNo(hasProfile), inline: true },
       { name: 'Ranks configured', value: yesNo(hasRanks), inline: true },
       { name: 'Permission roles', value: yesNo(hasPermissionRoles), inline: true },
-      { name: 'Department member role', value: yesNo(hasDepartmentMemberRole), inline: true },
       { name: 'Log channels', value: yesNo(hasLogChannels), inline: true },
       { name: 'Google enabled', value: yesNo(config.google.enabled), inline: true },
       { name: 'Google webhook', value: config.google.webhookUrl ? 'SET' : 'NOT SET', inline: true },
@@ -448,8 +433,6 @@ async function addRank(interaction) {
       notes: interaction.options.getString('notes') ?? existing?.notes ?? '',
       isCommandStaff: interaction.options.getBoolean('command-staff') ?? existing?.isCommandStaff ?? false,
       isSupervisor: interaction.options.getBoolean('supervisor') ?? existing?.isSupervisor ?? false,
-      isSupervisorInTraining: interaction.options.getBoolean('supervisor-in-training') ?? existing?.isSupervisorInTraining ?? false,
-      isDepartmentAdminStaff: interaction.options.getBoolean('dept-admin-staff') ?? existing?.isDepartmentAdminStaff ?? false,
       isProbationary: interaction.options.getBoolean('probationary') ?? existing?.isProbationary ?? false,
       isRecruit: interaction.options.getBoolean('recruit') ?? existing?.isRecruit ?? false,
       isActivityExempt: activityExempt,
@@ -505,8 +488,6 @@ async function editRank(interaction, config) {
     'notes',
     'command-staff',
     'supervisor',
-    'supervisor-in-training',
-    'dept-admin-staff',
     'probationary',
     'recruit',
     'minimum-days'
@@ -558,8 +539,6 @@ async function editRank(interaction, config) {
       notes: interaction.options.getString('notes') ?? existing.notes ?? '',
       isCommandStaff: interaction.options.getBoolean('command-staff') ?? existing.isCommandStaff ?? false,
       isSupervisor: interaction.options.getBoolean('supervisor') ?? existing.isSupervisor ?? false,
-      isSupervisorInTraining: interaction.options.getBoolean('supervisor-in-training') ?? existing.isSupervisorInTraining ?? false,
-      isDepartmentAdminStaff: interaction.options.getBoolean('dept-admin-staff') ?? existing.isDepartmentAdminStaff ?? false,
       isProbationary: interaction.options.getBoolean('probationary') ?? existing.isProbationary ?? false,
       isRecruit: interaction.options.getBoolean('recruit') ?? existing.isRecruit ?? false,
       isActivityExempt: activityExempt,
@@ -776,12 +755,6 @@ async function googleSync(interaction, config) {
       activitySemiActiveHours: rank.activity?.semiActiveHours ?? null,
       activityExempt: Boolean(rank.activity?.exempt ?? rank.isActivityExempt),
       activityCadet: Boolean(rank.activity?.cadet ?? rank.isActivityCadet),
-      commandStaff: Boolean(rank.isCommandStaff),
-      supervisor: Boolean(rank.isSupervisor),
-      supervisorInTraining: Boolean(rank.isSupervisorInTraining),
-      deptAdminStaff: Boolean(rank.isDepartmentAdminStaff),
-      probationary: Boolean(rank.isProbationary),
-      recruit: Boolean(rank.isRecruit),
       minimumDaysInRank: rank.promotion?.minimumDaysInRank ?? 0
     }))
   };
@@ -824,10 +797,10 @@ async function showWizard(interaction, config, step = 0, update = false) {
     ['Welcome', 'This walkthrough helps configure dev mode, department identity, setup/admin roles, command staff roles, log channels, error log channel, Google integration, ranks, tickets, and final review.'],
     ['Enable dev mode', 'Use /department-setup dev-mode enabled:true user:@You role:@DevRole to limit access while setting up.'],
     ['Department identity', 'Use /department-setup profile to save Department Name and Acronym. Department key defaults to main.'],
-    ['Core roles', 'Use /department-setup role type:setup-admin, command-staff, high-command, dept-admin-staff, supervisor, supervisor-in-training, department-member, and previous-officer.'],
+    ['Core roles', 'Use /department-setup role type:setup-admin, command-staff, high-command, supervisor, member, and previous-officer.'],
     ['Log channels', 'Use /department-setup channel. The server error log channel is type:server-errors.'],
     ['Google integration', 'Use /department-setup google enabled:true only after URLs/secrets are configured in environment variables.'],
-    ['Rank setup', 'Use /department-setup rank-add with required name, rank-role, order and optional activity/flag fields. Use supervisor-in-training:true for Lead Officer/Corporal and dept-admin-staff:true for Chief/Deputy Chief/Commander. Ranks save locally only.'],
+    ['Rank setup', 'Use /department-setup rank-add with required name, rank-role, order and optional activity fields. Ranks save locally only.'],
     ['Ticket basics', 'Use ticket setup commands for ticket types and ticket panel settings.'],
     ['Final review', `Department: ${config.department?.name || 'Not set'}\nDev mode: ${config.devOnly?.enabled ? 'Enabled' : 'Disabled'}\nRanks: ${(config.ranks || []).length}\nGoogle: ${config.google?.enabled ? 'Enabled' : 'Disabled'}\nServer error channel: ${config.channels?.serverErrorLogChannelId ? 'Set' : 'Not set'}`]
   ];
@@ -846,6 +819,97 @@ async function showWizard(interaction, config, step = 0, update = false) {
   return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
+async function googleSync(interaction, config) {
+  const target = interaction.options.getString('target', true);
+  if (target !== 'ranks') return interaction.reply({ content: 'Only target:ranks is supported right now.', ephemeral: true });
+  if (!isGoogleEnabled(config)) return interaction.reply({ content: 'Google integration is disabled for this server. Rank sync was not run.', ephemeral: true });
+  if (!isGoogleConfigured(config)) return interaction.reply({ content: 'Google integration is enabled, but the Google Web App / Worker URL is not configured.', ephemeral: true });
+
+  const departmentKey = config.google?.departmentKey || config.departmentKey || 'main';
+  const payload = {
+    action: 'SYNC_RANKS_CONFIG',
+    actionType: 'SYNC_RANKS_CONFIG',
+    guildId: interaction.guildId,
+    departmentKey,
+    departmentName: config.department?.name || config.departmentName || interaction.guild?.name || '',
+    ranks: (config.ranks || []).map((rank) => ({
+      rankKey: rank.key || slugifyRankKey(rank.name),
+      rankName: rank.name,
+      rankOrder: rank.order ?? rank.level ?? 0,
+      department: rank.department || departmentKey,
+      assignCallsign: Boolean(rank.assignCallsign),
+      active: rank.active !== false,
+      discordRoleId: rank.rankRoleId || '',
+      permissionRoleId: rank.permissionRoleId || '',
+      notes: rank.notes || '',
+      activityActiveHours: rank.activity?.activeHours ?? null,
+      activitySemiActiveHours: rank.activity?.semiActiveHours ?? null,
+      activityExempt: Boolean(rank.activity?.exempt ?? rank.isActivityExempt),
+      activityCadet: Boolean(rank.activity?.cadet ?? rank.isActivityCadet),
+      minimumDaysInRank: rank.promotion?.minimumDaysInRank ?? 0
+    }))
+  };
+
+  await interaction.deferReply({ ephemeral: true });
+  const result = await postToGoogle('submitBotRequest', payload);
+  await interaction.editReply(`Rank sync complete.\nAdded: ${result.added ?? result.result?.added ?? 0}\nUpdated: ${result.updated ?? result.result?.updated ?? 0}\nSkipped: ${result.skipped ?? result.result?.skipped ?? 0}`);
+}
+
+async function saveDevMode(interaction) {
+  const enabled = interaction.options.getBoolean('enabled', true);
+  const user = interaction.options.getUser('user');
+  const role = interaction.options.getRole('role');
+  const saved = updateGuildConfig(interaction.guildId, (draft) => {
+    draft.devOnly.enabled = enabled;
+    draft.devOnly.bypassForBotAdmins = true;
+    if (user && !draft.devOnly.userIds.includes(user.id)) draft.devOnly.userIds.push(user.id);
+    if (role && !draft.devOnly.roleIds.includes(role.id)) draft.devOnly.roleIds.push(role.id);
+    draft.setup.updatedBy = interaction.user.id;
+    return draft;
+  });
+  const warning = enabled && !saved.devOnly.userIds.length && !saved.devOnly.roleIds.length && saved.devOnly.bypassForBotAdmins === false ? '\nWarning: no allowed dev user/role or bot admin bypass is configured.' : '';
+  return interaction.reply({ content: `Dev mode ${enabled ? 'enabled' : 'disabled'}. Only configured dev users/roles and bot admins can use setup commands.${warning}`, ephemeral: true });
+}
+
+async function addDevUser(interaction) {
+  const user = interaction.options.getUser('user', true);
+  updateGuildConfig(interaction.guildId, (draft) => { if (!draft.devOnly.userIds.includes(user.id)) draft.devOnly.userIds.push(user.id); return draft; });
+  return interaction.reply({ content: `Added ${user} to dev mode access.`, ephemeral: true });
+}
+
+async function addDevRole(interaction) {
+  const role = interaction.options.getRole('role', true);
+  updateGuildConfig(interaction.guildId, (draft) => { if (!draft.devOnly.roleIds.includes(role.id)) draft.devOnly.roleIds.push(role.id); return draft; });
+  return interaction.reply({ content: `Added ${role} to dev mode access.`, ephemeral: true });
+}
+
+async function showWizard(interaction, config, step = 0, update = false) {
+  const steps = [
+    ['Welcome', 'This walkthrough helps configure dev mode, department identity, setup/admin roles, command staff roles, log channels, error log channel, Google integration, ranks, tickets, and final review.'],
+    ['Enable dev mode', 'Use /department-setup dev-mode enabled:true user:@You role:@DevRole to limit access while setting up.'],
+    ['Department identity', 'Use /department-setup profile to save Department Name and Acronym. Department key defaults to main.'],
+    ['Core roles', 'Use /department-setup role type:setup-admin, command-staff, high-command, supervisor, member, and previous-officer.'],
+    ['Log channels', 'Use /department-setup channel. The server error log channel is type:server-errors.'],
+    ['Google integration', 'Use /department-setup google enabled:true only after URLs/secrets are configured in environment variables.'],
+    ['Rank setup', 'Use /department-setup rank-add with required name, rank-role, order and optional activity fields. Ranks save locally only.'],
+    ['Ticket basics', 'Use ticket setup commands for ticket types and ticket panel settings.'],
+    ['Final review', `Department: ${config.department?.name || 'Not set'}\nDev mode: ${config.devOnly?.enabled ? 'Enabled' : 'Disabled'}\nRanks: ${(config.ranks || []).length}\nGoogle: ${config.google?.enabled ? 'Enabled' : 'Disabled'}\nServer error channel: ${config.channels?.serverErrorLogChannelId ? 'Set' : 'Not set'}`]
+  ];
+  const index = Math.max(0, Math.min(step, steps.length - 1));
+  updateGuildConfig(interaction.guildId, (draft) => { draft.setupWizard = { inProgress: true, step: steps[index][0], startedBy: draft.setupWizard?.startedBy || interaction.user.id, startedAt: draft.setupWizard?.startedAt || new Date().toISOString(), updatedAt: new Date().toISOString() }; return draft; });
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard:${interaction.guildId}:${Math.max(0, index - 1)}`).setLabel('Back').setStyle(ButtonStyle.Secondary).setDisabled(index === 0),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard:${interaction.guildId}:${Math.min(steps.length - 1, index + 1)}`).setLabel(index === 0 ? 'Start' : 'Next').setStyle(ButtonStyle.Primary).setDisabled(index === steps.length - 1),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard:${interaction.guildId}:${Math.min(steps.length - 1, index + 1)}`).setLabel('Skip').setStyle(ButtonStyle.Secondary).setDisabled(index === steps.length - 1),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard-cancel:${interaction.guildId}`).setLabel('Cancel').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`${CUSTOM_ID_PREFIX}:wizard-finish:${interaction.guildId}`).setLabel('Finish').setStyle(ButtonStyle.Success)
+  );
+  const embed = new EmbedBuilder().setTitle(`Setup Walkthrough: ${steps[index][0]}`).setDescription(steps[index][1]).setColor(0x5865f2).setFooter({ text: `Step ${index + 1} of ${steps.length}` });
+  const payload = { embeds: [embed], components: [row], ephemeral: true };
+  if (update) return interaction.update(payload);
+  return interaction.reply(payload);
+}
+
 function formatRankFields(rank) {
   return [
     { name: 'Name', value: rank.name, inline: true },
@@ -861,10 +925,8 @@ function rankFlags(rank) {
   const flags = [];
   if (rank.isRecruit) flags.push('Recruit');
   if (rank.isProbationary) flags.push('Probationary');
-  if (rank.isSupervisorInTraining) flags.push('Supervisor In Training');
   if (rank.isSupervisor) flags.push('Supervisor');
   if (rank.isCommandStaff) flags.push('Command Staff');
-  if (rank.isDepartmentAdminStaff) flags.push('Dept Admin Staff');
   return flags.length ? flags.join(', ') : 'None';
 }
 
