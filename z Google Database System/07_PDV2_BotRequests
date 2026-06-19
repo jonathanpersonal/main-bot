@@ -138,7 +138,7 @@ function pdv2ProcessBotRequest_(requestId, actionType, data) {
     }
 
     if (actionType === 'SYNC_RANKS_CONFIG') {
-      return pdv2SyncRanksConfig_(data);
+      return pdv2SyncRanksConfig_(data, requestId);
     }
 
     if (actionType === 'PROMOTE' || actionType === 'DEMOTE' || actionType === 'SET_RANK') {
@@ -367,18 +367,20 @@ function pdv2GetRequestStatus_(requestId) {
 }
 
 
-function pdv2SyncRanksConfig_(data) {
-  return pdv2WithLock_(function() {
-  var ranks = data.ranks || (data.payload && data.payload.ranks) || [];
-  if (!Array.isArray(ranks)) ranks = [];
+function pdv2ProcessSyncRanksConfig_(payload, requestId) {
+  payload = payload || {};
+  if (payload.payload && typeof payload.payload === 'object') payload = Object.assign({}, payload, payload.payload);
+  var ranks = payload.ranks;
+  if (!Array.isArray(ranks)) return pdv2Fail_('SYNC_RANKS_CONFIG payload.ranks must be an array.');
+
   pdv2EnsureSheet_(PDV2.SHEETS.RANKS);
   var sh = pdv2GetSheet_(PDV2.SHEETS.RANKS);
   var map = pdv2HeaderMap_(sh);
   var existing = pdv2ListRows_(PDV2.SHEETS.RANKS);
   var index = {};
   existing.forEach(function(row, i) {
-    var key = pdv2String_(row['Rank Key']).toLowerCase();
-    var dept = pdv2String_(row.Department || data.departmentKey || 'main').toLowerCase();
+    var key = pdv2NormalizeRankKey_(row['Rank Key'], row['Rank Name']);
+    var dept = pdv2String_(row.Department || payload.departmentKey || 'main').toLowerCase();
     if (key) index[key + '|' + dept] = i + 2;
   });
 
@@ -386,34 +388,44 @@ function pdv2SyncRanksConfig_(data) {
   var updated = 0;
   var skipped = 0;
   var errors = [];
-  ranks.forEach(function(rank) {
+  var now = pdv2Now_();
+
+  ranks.forEach(function(rank, idx) {
     try {
-      var rankKey = pdv2String_(rank.rankKey || rank.key);
-      var department = pdv2String_(rank.department || data.departmentKey || 'main') || 'main';
-      if (!rankKey) { skipped++; return; }
+      rank = rank || {};
+      var rankName = pdv2String_(rank.rankName || rank.name);
+      var rankKey = pdv2NormalizeRankKey_(rank.rankKey || rank.key, rankName);
+      var department = pdv2String_(rank.department || payload.departmentKey || 'main') || 'main';
+      if (!rankKey) {
+        skipped++;
+        errors.push('Rank at index ' + idx + ' is missing a usable rank key/name.');
+        return;
+      }
+
       var rowObject = {
         'Rank Key': rankKey,
-        'Rank Name': pdv2String_(rank.rankName || rank.name),
-        'Rank Order': rank.rankOrder || rank.order || 0,
+        'Rank Name': rankName,
+        'Rank Order': pdv2ToNumberOrBlank_(rank.rankOrder != null ? rank.rankOrder : rank.order),
         'Department': department,
-        'Assign Callsign': rank.assignCallsign === true ? 'TRUE' : 'FALSE',
-        'Active': rank.active === false ? 'FALSE' : 'TRUE',
+        'Assign Callsign': pdv2ToBool_(rank.assignCallsign, false),
+        'Active': pdv2ToBool_(rank.active, true),
         'Discord Role ID': pdv2String_(rank.discordRoleId || rank.rankRoleId),
         'Permission Role ID': pdv2String_(rank.permissionRoleId),
         'Notes': pdv2String_(rank.notes),
-        'Updated At': pdv2Now_(),
-        'Activity Active Hours': rank.activityActiveHours == null ? '' : rank.activityActiveHours,
-        'Activity Semi Active Hours': rank.activitySemiActiveHours == null ? '' : rank.activitySemiActiveHours,
-        'Activity Exempt': rank.activityExempt === true ? 'TRUE' : 'FALSE',
-        'Activity Cadet': rank.activityCadet === true ? 'TRUE' : 'FALSE',
-        'Command Staff': rank.commandStaff === true ? 'TRUE' : 'FALSE',
-        'Supervisor': rank.supervisor === true ? 'TRUE' : 'FALSE',
-        'Supervisor In Training': rank.supervisorInTraining === true ? 'TRUE' : 'FALSE',
-        'Dept Admin Staff': rank.deptAdminStaff === true ? 'TRUE' : 'FALSE',
-        'Probationary': rank.probationary === true ? 'TRUE' : 'FALSE',
-        'Recruit': rank.recruit === true ? 'TRUE' : 'FALSE',
-        'Minimum Days In Rank': rank.minimumDaysInRank == null ? '' : rank.minimumDaysInRank
+        'Updated At': now,
+        'Activity Active Hours': pdv2ToNumberOrBlank_(rank.activityActiveHours),
+        'Activity Semi Active Hours': pdv2ToNumberOrBlank_(rank.activitySemiActiveHours),
+        'Activity Exempt': pdv2ToBool_(rank.activityExempt, false),
+        'Activity Cadet': pdv2ToBool_(rank.activityCadet, false),
+        'Command Staff': pdv2ToBool_(rank.commandStaff, false),
+        'Supervisor': pdv2ToBool_(rank.supervisor, false),
+        'Supervisor In Training': pdv2ToBool_(rank.supervisorInTraining, false),
+        'Department Admin Staff': pdv2ToBool_(rank.deptAdminStaff, false),
+        'Probationary': pdv2ToBool_(rank.probationary, false),
+        'Recruit': pdv2ToBool_(rank.recruit, false),
+        'Minimum Days In Rank': pdv2ToNumberOrBlank_(rank.minimumDaysInRank)
       };
+
       var rowNumber = index[rankKey.toLowerCase() + '|' + department.toLowerCase()];
       if (rowNumber) {
         Object.keys(rowObject).forEach(function(header) {
@@ -421,15 +433,49 @@ function pdv2SyncRanksConfig_(data) {
         });
         updated++;
       } else {
-        pdv2AppendObjects_(PDV2.SHEETS.RANKS, [rowObject]);
+        pdv2AppendObject_(PDV2.SHEETS.RANKS, rowObject);
         added++;
+        index[rankKey.toLowerCase() + '|' + department.toLowerCase()] = sh.getLastRow();
       }
     } catch (err) {
       skipped++;
-      errors.push(err.message || String(err));
+      errors.push(err && err.message ? err.message : String(err));
     }
   });
-  return { ok: true, action: 'SYNC_RANKS_CONFIG', added: added, updated: updated, skipped: skipped, errors: errors };
 
+  return { ok: true, action: 'SYNC_RANKS_CONFIG', requestId: requestId || '', added: added, updated: updated, skipped: skipped, errors: errors };
+}
+
+function pdv2SyncRanksConfig_(data, requestId) {
+  data = data || {};
+  var resolvedRequestId = requestId || data.requestId || '';
+  return pdv2WithLock_(function() {
+    var result = pdv2ProcessSyncRanksConfig_(data, resolvedRequestId);
+    pdv2Audit_('DISCORD_BOT', 'SYNC_RANKS_CONFIG', pdv2Pick_(data, ['submittedByDiscordId', 'actorDiscordId', 'userId'], ''), 'Ranks', resolvedRequestId, data.guildId || '', result);
+    return result;
   }, 5000);
 }
+
+function pdv2ToBool_(value, defaultValue) {
+  if (value === true || value === false) return value;
+  if (value === null || value === undefined || value === '') return !!defaultValue;
+  var text = pdv2String_(value).toLowerCase();
+  if (text === 'true' || text === 'yes' || text === 'y' || text === '1') return true;
+  if (text === 'false' || text === 'no' || text === 'n' || text === '0') return false;
+  return !!defaultValue;
+}
+
+function pdv2ToNumberOrBlank_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  var num = Number(value);
+  return isNaN(num) ? '' : num;
+}
+
+function pdv2NormalizeRankKey_(value, fallbackName) {
+  var raw = pdv2String_(value).trim();
+  var key = raw.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  var unsafe = raw && /[^a-zA-Z0-9_\-\s]/.test(raw);
+  if (!key || unsafe) key = pdv2String_(fallbackName).trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  return key;
+}
+

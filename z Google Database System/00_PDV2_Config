@@ -223,6 +223,8 @@ var PDV2 = {
       'Active',
       'Discord Role ID',
       'Permission Role ID',
+      'Notes',
+      'Updated At',
       'Activity Active Hours',
       'Activity Semi Active Hours',
       'Activity Exempt',
@@ -230,12 +232,10 @@ var PDV2 = {
       'Command Staff',
       'Supervisor',
       'Supervisor In Training',
-      'Dept Admin Staff',
+      'Department Admin Staff',
       'Probationary',
       'Recruit',
-      'Minimum Days In Rank',
-      'Notes',
-      'Updated At'
+      'Minimum Days In Rank'
     ],
 
     StaffAccess: [

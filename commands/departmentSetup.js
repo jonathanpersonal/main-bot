@@ -15,6 +15,7 @@ const { requireSetupAdmin } = require('../utils/setupPermissions');
 const { sanitizeConfigForDisplay } = require('../utils/configSanitizer');
 const { postToGoogle } = require('../utils/googleWebhook');
 const { isGoogleEnabled, isGoogleConfigured } = require('../utils/googleConfigUtils');
+const { logServerError } = require('../utils/errorLogUtils');
 
 const CUSTOM_ID_PREFIX = 'department-setup';
 
@@ -418,10 +419,11 @@ async function addRank(interaction) {
   const rankRole = interaction.options.getRole('rank-role', true);
   const permissionRole = interaction.options.getRole('permission-role');
   const order = interaction.options.getInteger('order', true);
-  const rankKey = (interaction.options.getString('rank-key') || slugifyRankKey(name)).trim();
+  const rawRankKey = interaction.options.getString('rank-key') || '';
+  const rankKey = normalizeRankKey(rawRankKey, name);
   const config = getGuildConfig(interaction.guildId);
   const department = (interaction.options.getString('department') || config.google?.departmentKey || config.departmentKey || 'main').trim() || 'main';
-  const existingByKey = config.ranks.find((rank) => (rank.key || '').toLowerCase() === rankKey.toLowerCase() && (rank.department || 'main').toLowerCase() === department.toLowerCase());
+  const existingByKey = config.ranks.find((rank) => normalizeRankKey(rank.key || rank.rankKey, rank.name).toLowerCase() === rankKey.toLowerCase() && (rank.department || 'main').toLowerCase() === department.toLowerCase());
   const existingByName = config.ranks.find((rank) => rank.name.toLowerCase() === name.toLowerCase());
   const existing = existingByKey || existingByName;
   const duplicateRole = config.ranks.find((rank) => rank.rankRoleId === rankRole.id && rank.name.toLowerCase() !== name.toLowerCase());
@@ -467,7 +469,7 @@ async function addRank(interaction) {
       }
     });
 
-    draft.ranks = draft.ranks.filter((item) => item !== existing && !((item.key || '').toLowerCase() === rankKey.toLowerCase() && (item.department || 'main').toLowerCase() === department.toLowerCase()));
+    draft.ranks = draft.ranks.filter((item) => item !== existing && !(normalizeRankKey(item.key || item.rankKey, item.name).toLowerCase() === rankKey.toLowerCase() && (item.department || 'main').toLowerCase() === department.toLowerCase()));
     draft.ranks.push(rank);
     draft.ranks.sort((a, b) => a.order - b.order);
     draft.setup.updatedBy = interaction.user.id;
@@ -475,9 +477,10 @@ async function addRank(interaction) {
     return draft;
   });
 
-  const savedRank = saved.ranks.find((rank) => (rank.key || '').toLowerCase() === rankKey.toLowerCase() && (rank.department || 'main').toLowerCase() === department.toLowerCase());
+  const savedRank = saved.ranks.find((rank) => normalizeRankKey(rank.key || rank.rankKey, rank.name).toLowerCase() === rankKey.toLowerCase() && (rank.department || 'main').toLowerCase() === department.toLowerCase());
+  const keyWarning = rawRankKey && rawRankKey.trim() !== rankKey ? `Rank key \"${rawRankKey.trim()}\" was normalized to \"${rankKey}\".\n` : '';
   const embed = new EmbedBuilder().setTitle('Rank Saved').setColor(0x2ecc71).addFields(formatRankFields(savedRank));
-  return interaction.reply({ content: 'Rank added to local config. Run /department-setup google-sync target:ranks when you are ready to push ranks to Google Sheets.', embeds: [embed], ephemeral: true });
+  return interaction.reply({ content: `${keyWarning}Rank added to local config. Run /department-setup google-sync target:ranks when you are ready to push ranks to Google Sheets.`, embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 async function editRank(interaction, config) {
@@ -520,8 +523,9 @@ async function editRank(interaction, config) {
   const rankRole = interaction.options.getRole('rank-role');
   const permissionRole = interaction.options.getRole('permission-role');
   const clearPermissionRole = interaction.options.getBoolean('clear-permission-role') ?? false;
-  const newKey = (interaction.options.getString('rank-key') || existing.key || slugifyRankKey(existing.name)).trim();
+  const rawNewKey = interaction.options.getString('rank-key') || existing.key || existing.rankKey || '';
   const newName = (interaction.options.getString('name') || existing.name).trim();
+  const newKey = normalizeRankKey(rawNewKey, newName);
   const newDepartment = (interaction.options.getString('department') || existing.department || config.google?.departmentKey || config.departmentKey || 'main').trim() || 'main';
 
   if (!newName) {
@@ -586,9 +590,10 @@ async function editRank(interaction, config) {
   });
 
   const savedRank = (saved.ranks || []).find((rank) => rankMatchesSelector(rank, rankSelector({ ...existing, key: newKey, department: newDepartment })))
-    || (saved.ranks || []).find((rank) => (rank.key || '').toLowerCase() === newKey.toLowerCase() && (rank.department || 'main').toLowerCase() === newDepartment.toLowerCase());
+    || (saved.ranks || []).find((rank) => normalizeRankKey(rank.key || rank.rankKey, rank.name).toLowerCase() === newKey.toLowerCase() && (rank.department || 'main').toLowerCase() === newDepartment.toLowerCase());
+  const keyWarning = rawNewKey && rawNewKey.trim() !== newKey ? `Rank key \"${rawNewKey.trim()}\" was normalized to \"${newKey}\".\n` : '';
   const embed = new EmbedBuilder().setTitle('Rank Updated').setColor(0x2ecc71).addFields(formatRankFields(savedRank || existing));
-  return interaction.reply({ content: 'Rank updated in local config. Run /department-setup google-sync target:ranks when you are ready to push ranks to Google Sheets.', embeds: [embed], flags: MessageFlags.Ephemeral });
+  return interaction.reply({ content: `${keyWarning}Rank updated in local config. Run /department-setup google-sync target:ranks when you are ready to push ranks to Google Sheets.`, embeds: [embed], flags: MessageFlags.Ephemeral });
 }
 
 function hasAnyProvidedOption(interaction, names) {
@@ -639,8 +644,15 @@ function showRankRemoveConfirmation(interaction, rank, update = false) {
   return interaction.reply({ content, components: [row], flags: MessageFlags.Ephemeral });
 }
 
+function normalizeRankKey(value, fallbackName = '') {
+  const raw = String(value || '').trim();
+  const cleanup = (input) => String(input || '').trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  const hasUnsafe = raw && /[^a-zA-Z0-9_\-\s]/.test(raw);
+  return (!raw || hasUnsafe ? cleanup(fallbackName) : cleanup(raw)) || 'rank';
+}
+
 function slugifyRankKey(name) {
-  return String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'rank';
+  return normalizeRankKey(name);
 }
 
 async function listRanks(interaction, config) {
@@ -763,7 +775,7 @@ async function googleSync(interaction, config) {
     departmentKey,
     departmentName: config.department?.name || config.departmentName || interaction.guild?.name || '',
     ranks: (config.ranks || []).map((rank) => ({
-      rankKey: rank.key || slugifyRankKey(rank.name),
+      rankKey: normalizeRankKey(rank.key || rank.rankKey, rank.name),
       rankName: rank.name,
       rankOrder: rank.order ?? rank.level ?? 0,
       department: rank.department || departmentKey,
@@ -789,7 +801,15 @@ async function googleSync(interaction, config) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   try {
     const result = await postToGoogle('syncRanksConfig', payload, { timeoutMs: 55000 });
-    await interaction.editReply(`Rank sync complete.\nAdded: ${result.added ?? result.result?.added ?? 0}\nUpdated: ${result.updated ?? result.result?.updated ?? 0}\nSkipped: ${result.skipped ?? result.result?.skipped ?? 0}`);
+    const processorResult = result.result || result;
+    const message = processorResult.message || result.message || '';
+    if (message.includes('No specific processor exists yet')) {
+      await interaction.editReply('Google received the request, but the Apps Script does not yet have a processor for SYNC_RANKS_CONFIG. Update the Google Database System and rerun the Apps Script installer.');
+      return;
+    }
+    const errors = Array.isArray(processorResult.errors) ? processorResult.errors : [];
+    if (errors.length) await logServerError(interaction, new Error(errors.join('\n')), { command: 'department-setup google-sync', action: 'SYNC_RANKS_CONFIG', guildId: interaction.guildId });
+    await interaction.editReply(`Rank sync complete.\nAdded: ${processorResult.added ?? 0}\nUpdated: ${processorResult.updated ?? 0}\nSkipped: ${processorResult.skipped ?? 0}${errors.length ? `\nErrors: ${errors.length} issue(s); details were logged to the server error log channel.` : ''}`);
   } catch (error) {
     if (error?.isGoogleLockBusy || error?.googleStatus === 423 || error?.googleCode === 'LOCK_BUSY') {
       await interaction.editReply('Google is busy processing another request. Wait a moment and try again.');
